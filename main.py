@@ -449,7 +449,7 @@ def main() -> None:
     print("pairwise distance matrix:")
     print(distance_matrix)
 
-    thresholds = np.linspace(0.5, 10.0, 10).tolist()
+    thresholds = np.linspace(0.5, 10.0, 4).tolist()
     plot_clustering_threshold_sweep(
         curves,
         distance_matrix,

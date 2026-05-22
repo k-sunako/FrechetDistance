@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Sequence, Any
 
 import math
-import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import fcluster, linkage
@@ -390,6 +389,7 @@ def generate_various_curves(
 ) -> list[list[Point2D]]:
     """
     正弦波・矩形波・ノコギリ波をそれぞれ指定数ずつ生成します。
+    種類のまとまりを弱めるため、各曲線にランダムな回転と平行移動を与えます。
     """
     if num_each_type < 1:
         raise ValueError("num_each_type は 1 以上で指定してください。")
@@ -537,8 +537,6 @@ def evaluate_clustering(
             "calinski_harabasz": float("nan"),
             "davies_bouldin": float("nan"),
         }
-
-    condensed = squareform(distance_matrix, checks=False)
 
     try:
         silhouette = float(silhouette_score(distance_matrix, labels, metric="precomputed"))
@@ -844,7 +842,7 @@ def plot_metric_comparison(
 
 def main() -> None:
     curves = generate_various_curves(
-        num_each_type=3,
+        num_each_type=6,
         seed=42,
         sawtooth_period=math.pi / 4.0,
         translate_range=20.0,

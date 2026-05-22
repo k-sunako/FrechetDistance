@@ -7,7 +7,7 @@
 - 2次元曲線同士の discrete Fréchet 距離を算出
 - 正弦波ベースの曲線群を生成
 - 曲線群の全組み合わせで距離行列を作成
-- 距離行列を使って scikit-learn の SpectralClustering でクラスタリング
+- 距離行列を使って階層クラスタリングを実施
 - matplotlib で曲線群を色分けして表示
 
 ** 実装の概要
@@ -29,14 +29,19 @@
 - 各曲線は長さ 2π の x 軸区間を持つ
 - 開始位置はランダム
 - y 値は正弦波にオフセットを加えて生成
+- 必要に応じて曲線全体を回転可能
 
 *** 3. 距離行列の作成
 
 生成した曲線群に対して、全ペアの discrete Fréchet 距離を計算し、対称な距離行列を作ります。
 
-*** 4. スペクトラルクラスタリング
+*** 4. 階層クラスタリング
 
-距離行列をそのままクラスタリング入力にはできないため、類似度行列に変換してから SpectralClustering を適用します。
+距離行列をそのまま使って階層クラスタリングを行います。
+
+- `n_clusters` を指定してクラスタ数を決めることも可能
+- `distance_threshold` を指定して、事前にクラスタ数を決めずに分割することも可能
+- `average` linkage をデフォルトとして採用
 
 *** 5. 可視化
 
@@ -45,11 +50,11 @@
 ** 実行例
 
 #+begin_src python
-from main import generate_sine_curves, compute_all_pair_frechet_distances, cluster_curves_with_spectral_clustering
+from main import generate_sine_curves, compute_all_pair_frechet_distances, cluster_curves_with_hierarchical_clustering
 
-curves = generate_sine_curves(num_curves=10, seed=42)
+curves = generate_sine_curves(num_curves=10, seed=42, rotation_step=10.0)
 distance_matrix = compute_all_pair_frechet_distances(curves)
-labels = cluster_curves_with_spectral_clustering(distance_matrix, n_clusters=3)
+labels = cluster_curves_with_hierarchical_clustering(distance_matrix, distance_threshold=2.0)
 #+end_src
 
 ** 依存ライブラリ
@@ -57,11 +62,10 @@ labels = cluster_curves_with_spectral_clustering(distance_matrix, n_clusters=3)
 - Python 3.12+
 - numpy
 - matplotlib
-- scikit-learn
 - scipy
 
 ** 補足
 
 - 曲線数を増やすと全組み合わせ距離計算が重くなります
 - discrete Fréchet 距離なので、連続 Fréchet 距離とは異なります
-- スペクトラルクラスタリングの結果は、類似度変換の仕方やクラスタ数に影響されます
+- 階層クラスタリングでは、距離しきい値の選び方で結果が変わります

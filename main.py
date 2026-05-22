@@ -5,7 +5,8 @@ from typing import Sequence
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.cluster import SpectralClustering
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
 
 
 Point2D = tuple[float, float]
@@ -196,18 +197,20 @@ def compute_all_pair_frechet_distances(
     return distances
 
 
-def cluster_curves_with_spectral_clustering(
+def cluster_curves_with_hierarchical_clustering(
     distance_matrix: np.ndarray,
-    n_clusters: int = 3,
-    random_state: int = 42,
+    n_clusters: int | None = None,
+    distance_threshold: float | None = None,
+    linkage_method: str = "average",
 ) -> np.ndarray:
     """
-    discrete Fréchet 距離行列を使ってスペクトラルクラスタリングします。
+    距離行列を使って階層クラスタリングします。
 
     Args:
         distance_matrix: shape=(n, n) の距離行列
-        n_clusters: クラスタ数
-        random_state: 乱数シード
+        n_clusters: クラスタ数を指定する場合
+        distance_threshold: 距離しきい値で分割する場合
+        linkage_method: linkage の手法 ("average", "complete", "single" など)
 
     Returns:
         各曲線のクラスタラベル
@@ -215,22 +218,17 @@ def cluster_curves_with_spectral_clustering(
     if distance_matrix.ndim != 2 or distance_matrix.shape[0] != distance_matrix.shape[1]:
         raise ValueError("distance_matrix は正方行列である必要があります。")
 
-    # 距離を類似度に変換する。
-    # 小さい距離ほど大きい値になるよう、RBF風の変換を使う。
-    positive_values = distance_matrix[distance_matrix > 0]
-    scale = float(np.median(positive_values)) if positive_values.size > 0 else 1.0
-    if scale <= 0:
-        scale = 1.0
+    if n_clusters is None and distance_threshold is None:
+        raise ValueError("n_clusters か distance_threshold のどちらかを指定してください。")
 
-    affinity = np.exp(-(distance_matrix ** 2) / (2.0 * scale ** 2))
-    np.fill_diagonal(affinity, 1.0)
+    condensed = squareform(distance_matrix, checks=False)
+    Z = linkage(condensed, method=linkage_method)
 
-    model = SpectralClustering(
-        n_clusters=n_clusters,
-        affinity="precomputed",
-        random_state=random_state,
-    )
-    labels = model.fit_predict(affinity)
+    if distance_threshold is not None:
+        labels = fcluster(Z, t=distance_threshold, criterion="distance")
+    else:
+        labels = fcluster(Z, t=n_clusters, criterion="maxclust")
+
     return labels
 
 
@@ -267,7 +265,7 @@ def plot_curves(curves: list[list[Point2D]], labels: np.ndarray | None = None) -
             ax.plot(
                 arr[:, 0],
                 arr[:, 1],
-                color=cmap(label % 10),
+                color=cmap((label - 1) % 10),
                 linewidth=1.8,
                 label=f"cluster {label}" if f"cluster {label}" not in ax.get_legend_handles_labels()[1] else None,
             )
@@ -307,7 +305,10 @@ def main() -> None:
     print("pairwise distance matrix:")
     print(distance_matrix)
 
-    labels = cluster_curves_with_spectral_clustering(distance_matrix, n_clusters=3)
+    labels = cluster_curves_with_hierarchical_clustering(
+        distance_matrix,
+        distance_threshold=2.0,
+    )
     print("cluster labels:")
     for i, label in enumerate(labels):
         print(f"curve[{i}] -> cluster {label}")

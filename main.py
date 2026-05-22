@@ -363,7 +363,7 @@ def main() -> None:
     print("pairwise distance matrix:")
     print(distance_matrix)
 
-    thresholds = [0.8, 1.2, 1.6, 2.0]
+    thresholds = [0.5, 2.0, 5.0, 10.0]
     plot_clustering_threshold_sweep(
         curves,
         distance_matrix,

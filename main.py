@@ -5,6 +5,7 @@ from typing import Sequence
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.cluster import SpectralClustering
 
 
 Point2D = tuple[float, float]
@@ -121,55 +122,109 @@ def generate_sine_curves(
 
 def compute_all_pair_frechet_distances(
     curves: list[list[Point2D]],
-) -> list[tuple[int, int, float]]:
+) -> np.ndarray:
     """
-    曲線群を総当たりで比較し、全組み合わせの discrete Fréchet 距離を返します。
+    曲線群を総当たりで比較し、距離行列を返します。
 
     Returns:
-        (i, j, distance) のリスト
+        shape=(n, n) の距離行列
     """
     if not curves:
         raise ValueError("比較する曲線がありません。")
 
-    results: list[tuple[int, int, float]] = []
     n = len(curves)
+    distances = np.zeros((n, n), dtype=float)
 
     for i in range(n):
         for j in range(i + 1, n):
             dist = discrete_frechet_distance(curves[i], curves[j])
-            results.append((i, j, dist))
+            distances[i, j] = dist
+            distances[j, i] = dist
 
-    return results
+    return distances
 
 
-def plot_curves(curves: list[list[Point2D]]) -> None:
+def cluster_curves_with_spectral_clustering(
+    distance_matrix: np.ndarray,
+    n_clusters: int = 3,
+    random_state: int = 42,
+) -> np.ndarray:
+    """
+    discrete Fréchet 距離行列を使ってスペクトラルクラスタリングします。
+
+    Args:
+        distance_matrix: shape=(n, n) の距離行列
+        n_clusters: クラスタ数
+        random_state: 乱数シード
+
+    Returns:
+        各曲線のクラスタラベル
+    """
+    if distance_matrix.ndim != 2 or distance_matrix.shape[0] != distance_matrix.shape[1]:
+        raise ValueError("distance_matrix は正方行列である必要があります。")
+
+    # 距離を類似度に変換する。
+    # 小さい距離ほど大きい値になるよう、RBF風の変換を使う。
+    positive_values = distance_matrix[distance_matrix > 0]
+    scale = float(np.median(positive_values)) if positive_values.size > 0 else 1.0
+    if scale <= 0:
+        scale = 1.0
+
+    affinity = np.exp(-(distance_matrix ** 2) / (2.0 * scale ** 2))
+    np.fill_diagonal(affinity, 1.0)
+
+    model = SpectralClustering(
+        n_clusters=n_clusters,
+        affinity="precomputed",
+        random_state=random_state,
+    )
+    labels = model.fit_predict(affinity)
+    return labels
+
+
+def plot_curves(curves: list[list[Point2D]], labels: np.ndarray | None = None) -> None:
     """
     曲線群を matplotlib で表示します。
-    各曲線は異なる色で描画されます。
+
+    labels が与えられた場合はクラスタごとに色分けします。
     """
     if not curves:
         raise ValueError("表示する曲線がありません。")
 
-    cmap = plt.get_cmap("viridis", len(curves))
-
     fig, ax = plt.subplots(figsize=(12, 8))
-    for i, curve in enumerate(curves):
-        arr = np.asarray(curve, dtype=float)
-        ax.plot(
-            arr[:, 0],
-            arr[:, 1],
-            color=cmap(i),
-            linewidth=1.5,
-            label=f"curve {i + 1}" if i < 10 else None,
-        )
+
+    if labels is None:
+        cmap = plt.get_cmap("viridis", len(curves))
+        for i, curve in enumerate(curves):
+            arr = np.asarray(curve, dtype=float)
+            ax.plot(
+                arr[:, 0],
+                arr[:, 1],
+                color=cmap(i),
+                linewidth=1.5,
+                label=f"curve {i + 1}" if i < 10 else None,
+            )
+        if len(curves) <= 10:
+            ax.legend(loc="best")
+    else:
+        unique_labels = sorted(set(int(x) for x in labels))
+        cmap = plt.get_cmap("tab10", max(len(unique_labels), 1))
+        for i, curve in enumerate(curves):
+            label = int(labels[i])
+            arr = np.asarray(curve, dtype=float)
+            ax.plot(
+                arr[:, 0],
+                arr[:, 1],
+                color=cmap(label % 10),
+                linewidth=1.8,
+                label=f"cluster {label}" if f"cluster {label}" not in ax.get_legend_handles_labels()[1] else None,
+            )
+        ax.legend(loc="best")
 
     ax.set_title("Generated Sine Curves")
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.grid(True, alpha=0.3)
-
-    if len(curves) <= 10:
-        ax.legend(loc="best")
 
     plt.tight_layout()
     plt.show()
@@ -196,12 +251,16 @@ def main() -> None:
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
 
-    pairwise_distances = compute_all_pair_frechet_distances(curves)
-    print(f"pairwise comparisons: {len(pairwise_distances)}")
-    for i, j, d in pairwise_distances[:10]:
-        print(f"curve[{i}] vs curve[{j}]: {d:.6f}")
+    distance_matrix = compute_all_pair_frechet_distances(curves)
+    print("pairwise distance matrix:")
+    print(distance_matrix)
 
-    plot_curves(curves)
+    labels = cluster_curves_with_spectral_clustering(distance_matrix, n_clusters=3)
+    print("cluster labels:")
+    for i, label in enumerate(labels):
+        print(f"curve[{i}] -> cluster {label}")
+
+    plot_curves(curves, labels=labels)
 
 
 if __name__ == "__main__":

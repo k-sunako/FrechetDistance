@@ -61,7 +61,7 @@ def discrete_frechet_distance(
 
 
 def generate_sine_curves(
-    num_curves: int = 100,
+    num_curves: int = 10,
     num_points: int = 200,
     amplitude: float = 1.0,
     offset_step: float = 0.1,

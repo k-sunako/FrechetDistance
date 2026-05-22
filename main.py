@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Sequence, Any
 
 import math
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+from sklearn.model_selection import ParameterGrid
 
 
 Point2D = tuple[float, float]
@@ -81,9 +84,6 @@ def normalize_curve(
 ) -> list[Point2D]:
     """
     Fourier記述子用に曲線を正規化します。
-
-    - center=True: 重心を原点へ移動
-    - scale=True: 全体スケールを標準化する
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
@@ -213,12 +213,6 @@ def fourier_descriptor(
 ) -> np.ndarray:
     """
     曲線の Fourier 記述子を計算します。
-
-    改善点:
-    - 弧長で再サンプリング
-    - 重心・スケール正規化
-    - 主成分軸で回転を揃える
-    - 開始点依存を弱める
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
@@ -396,7 +390,6 @@ def generate_various_curves(
 ) -> list[list[Point2D]]:
     """
     正弦波・矩形波・ノコギリ波をそれぞれ指定数ずつ生成します。
-    種類のまとまりを弱めるため、各曲線にランダムな回転と平行移動を与えます。
     """
     if num_each_type < 1:
         raise ValueError("num_each_type は 1 以上で指定してください。")
@@ -525,6 +518,140 @@ def cluster_curves_with_hierarchical_clustering(
     return labels
 
 
+def evaluate_clustering(
+    distance_matrix: np.ndarray,
+    labels: np.ndarray,
+) -> dict[str, float]:
+    """
+    クラスタリング結果を評価する指標を計算します。
+    """
+    if distance_matrix.ndim != 2 or distance_matrix.shape[0] != distance_matrix.shape[1]:
+        raise ValueError("distance_matrix は正方行列である必要があります。")
+    if len(labels) != distance_matrix.shape[0]:
+        raise ValueError("labels の長さが distance_matrix と一致していません。")
+
+    unique_labels = np.unique(labels)
+    if unique_labels.size < 2:
+        return {
+            "silhouette": float("nan"),
+            "calinski_harabasz": float("nan"),
+            "davies_bouldin": float("nan"),
+        }
+
+    condensed = squareform(distance_matrix, checks=False)
+
+    try:
+        silhouette = float(silhouette_score(distance_matrix, labels, metric="precomputed"))
+    except Exception:
+        silhouette = float("nan")
+
+    try:
+        ch = float(calinski_harabasz_score(distance_matrix, labels))
+    except Exception:
+        ch = float("nan")
+
+    try:
+        db = float(davies_bouldin_score(distance_matrix, labels))
+    except Exception:
+        db = float("nan")
+
+    return {
+        "silhouette": silhouette,
+        "calinski_harabasz": ch,
+        "davies_bouldin": db,
+    }
+
+
+def score_clustering_metrics(metrics: dict[str, float]) -> float:
+    """
+    最適化用のスコアに変換します。
+    silhouette と CH は高いほど良い、DB は低いほど良い。
+    """
+    score = 0.0
+
+    silhouette = metrics.get("silhouette", float("nan"))
+    ch = metrics.get("calinski_harabasz", float("nan"))
+    db = metrics.get("davies_bouldin", float("nan"))
+
+    if np.isfinite(silhouette):
+        score += silhouette * 2.0
+    if np.isfinite(ch):
+        score += math.log1p(max(ch, 0.0)) * 0.1
+    if np.isfinite(db):
+        score -= db * 0.5
+
+    return float(score)
+
+
+def optimize_clustering_parameters(
+    curves: list[list[Point2D]],
+    param_grid: dict[str, list[Any]],
+    target_cluster_count: int | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """
+    scikit-learn を使ってパラメータ候補を総当たりし、最適な組み合わせを探索します。
+    """
+    if not curves:
+        raise ValueError("比較する曲線がありません。")
+    if not param_grid:
+        raise ValueError("param_grid が空です。")
+
+    results: list[dict[str, Any]] = []
+    best_params: dict[str, Any] | None = None
+    best_score = -float("inf")
+
+    for params in ParameterGrid(param_grid):
+        distance_matrix = compute_all_pair_distances(
+            curves,
+            num_coefficients=int(params.get("num_coefficients", 16)),
+            use_magnitude_only=bool(params.get("use_magnitude_only", False)),
+            resample_points=params.get("resample_points", 256),
+            use_pca_alignment=bool(params.get("use_pca_alignment", True)),
+            use_start_alignment=bool(params.get("use_start_alignment", True)),
+        )
+
+        if "distance_threshold" in params and params["distance_threshold"] is not None:
+            labels = cluster_curves_with_hierarchical_clustering(
+                distance_matrix,
+                distance_threshold=float(params["distance_threshold"]),
+                linkage_method=str(params.get("linkage_method", "average")),
+            )
+        else:
+            n_clusters = params.get("n_clusters", target_cluster_count)
+            if n_clusters is None:
+                raise ValueError("n_clusters か distance_threshold を指定してください。")
+            labels = cluster_curves_with_hierarchical_clustering(
+                distance_matrix,
+                n_clusters=int(n_clusters),
+                linkage_method=str(params.get("linkage_method", "average")),
+            )
+
+        metrics = evaluate_clustering(distance_matrix, labels)
+        score = score_clustering_metrics(metrics)
+
+        if target_cluster_count is not None:
+            cluster_count = len(np.unique(labels))
+            score -= abs(cluster_count - target_cluster_count) * 10.0
+
+        row = {
+            "params": dict(params),
+            "score": score,
+            "labels": labels,
+            "metrics": metrics,
+        }
+        results.append(row)
+
+        if score > best_score:
+            best_score = score
+            best_params = dict(params)
+
+    if best_params is None:
+        raise RuntimeError("最適化に失敗しました。")
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return best_params, results
+
+
 def find_distance_threshold_for_cluster_count(
     distance_matrix: np.ndarray,
     target_cluster_count: int,
@@ -630,7 +757,6 @@ def plot_curves_side_by_side(
 ) -> None:
     """
     左右2枚のサブプロットで曲線群を比較表示します。
-    左は元の曲線、右はラベル付きの表示です。
     """
     if not curves:
         raise ValueError("表示する曲線がありません。")
@@ -757,6 +883,31 @@ def main() -> None:
     print("cluster labels:")
     for i, label in enumerate(labels):
         print(f"curve[{i}] -> cluster {label}")
+
+    print("clustering metrics:")
+    metrics = evaluate_clustering(distance_matrix, labels)
+    for key, value in metrics.items():
+        print(f"{key}: {value}")
+
+    param_grid = {
+        "num_coefficients": [4, 8, 16, 32],
+        "use_magnitude_only": [False, True],
+        "resample_points": [64, 128, 256],
+        "use_pca_alignment": [False, True],
+        "use_start_alignment": [False, True],
+        "linkage_method": ["average", "complete", "single"],
+    }
+
+    best_params, results = optimize_clustering_parameters(
+        curves,
+        param_grid=param_grid,
+        target_cluster_count=3,
+    )
+    print("best params:")
+    print(best_params)
+    print("top 5 results:")
+    for row in results[:5]:
+        print(row["score"], row["params"], row["metrics"])
 
     plot_curves_side_by_side(
         curves,

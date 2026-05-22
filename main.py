@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Sequence
 
 import math
@@ -110,15 +109,6 @@ def fourier_descriptor(
 
     曲線を複素数列 z = x + i y として扱い、
     FFT の低周波成分を特徴量として取り出します。
-
-    Args:
-        curve: 2次元点列
-        num_coefficients: 使用する係数数
-        normalize: 重心移動とスケール正規化を行うか
-        use_magnitude_only: True の場合は係数の絶対値のみを使う
-
-    Returns:
-        1次元特徴量ベクトル
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
@@ -473,15 +463,18 @@ def plot_curves(
     else:
         unique_labels = sorted(set(int(x) for x in labels))
         cmap = plt.get_cmap("tab10", max(len(unique_labels), 1))
+        seen = set()
         for i, curve in enumerate(curves):
             label = int(labels[i])
             arr = np.asarray(curve, dtype=float)
+            legend_label = f"cluster {label}" if label not in seen else None
+            seen.add(label)
             ax.plot(
                 arr[:, 0],
                 arr[:, 1],
                 color=cmap((label - 1) % 10),
                 linewidth=1.8,
-                label=f"cluster {label}" if f"cluster {label}" not in ax.get_legend_handles_labels()[1] else None,
+                label=legend_label,
             )
         ax.legend(loc="best")
 
@@ -489,6 +482,63 @@ def plot_curves(
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_curves_side_by_side(
+    curves: list[list[Point2D]],
+    labels: np.ndarray | None = None,
+    title_left: str = "Original Curves",
+    title_right: str = "Fourier Descriptor Comparison",
+) -> None:
+    """
+    左右2枚のサブプロットで曲線群を比較表示します。
+    左は元の曲線、右はラベル付きの表示です。
+    """
+    if not curves:
+        raise ValueError("表示する曲線がありません。")
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    ax_left, ax_right = axes
+
+    cmap_left = plt.get_cmap("viridis", len(curves))
+    for i, curve in enumerate(curves):
+        arr = np.asarray(curve, dtype=float)
+        ax_left.plot(arr[:, 0], arr[:, 1], color=cmap_left(i), linewidth=1.5)
+    ax_left.set_title(title_left)
+    ax_left.set_xlabel("x")
+    ax_left.set_ylabel("y")
+    ax_left.grid(True, alpha=0.3)
+
+    if labels is None:
+        cmap_right = plt.get_cmap("viridis", len(curves))
+        for i, curve in enumerate(curves):
+            arr = np.asarray(curve, dtype=float)
+            ax_right.plot(arr[:, 0], arr[:, 1], color=cmap_right(i), linewidth=1.5)
+    else:
+        unique_labels = sorted(set(int(x) for x in labels))
+        cmap_right = plt.get_cmap("tab10", max(len(unique_labels), 1))
+        seen = set()
+        for i, curve in enumerate(curves):
+            label = int(labels[i])
+            arr = np.asarray(curve, dtype=float)
+            legend_label = f"cluster {label}" if label not in seen else None
+            seen.add(label)
+            ax_right.plot(
+                arr[:, 0],
+                arr[:, 1],
+                color=cmap_right((label - 1) % 10),
+                linewidth=1.8,
+                label=legend_label,
+            )
+        ax_right.legend(loc="best")
+
+    ax_right.set_title(title_right)
+    ax_right.set_xlabel("x")
+    ax_right.set_ylabel("y")
+    ax_right.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.show()
@@ -522,31 +572,13 @@ def plot_metric_comparison(
         distance_threshold=threshold,
         linkage_method=linkage_method,
     )
-    cluster_count = len(set(int(x) for x in labels))
 
-    fig, ax = plt.subplots(figsize=(12, 8))
-    cmap = plt.get_cmap("tab10", max(cluster_count, 1))
-
-    for i, curve in enumerate(curves):
-        label = int(labels[i])
-        arr = np.asarray(curve, dtype=float)
-        ax.plot(
-            arr[:, 0],
-            arr[:, 1],
-            color=cmap((label - 1) % 10),
-            linewidth=1.6,
-        )
-
-    descriptor_mode = "magnitude" if use_magnitude_only else "complex"
-    ax.set_title(
-        f"Fourier descriptor clustering / threshold={threshold:.4f} / clusters={cluster_count} / mode={descriptor_mode}"
+    plot_curves_side_by_side(
+        curves,
+        labels=labels,
+        title_left="Original Curves",
+        title_right=f"Fourier Descriptor Clustering / threshold={threshold:.4f}",
     )
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.show()
 
 
 def main() -> None:
@@ -588,7 +620,12 @@ def main() -> None:
     for i, label in enumerate(labels):
         print(f"curve[{i}] -> cluster {label}")
 
-    plot_curves(curves, labels=labels, title="Fourier descriptor clustering")
+    plot_curves_side_by_side(
+        curves,
+        labels=labels,
+        title_left="Generated Curves",
+        title_right="Fourier Descriptor Clustering",
+    )
     plot_metric_comparison(
         curves,
         num_coefficients=16,

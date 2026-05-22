@@ -4,6 +4,7 @@ from typing import Sequence
 
 import math
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 Point2D = tuple[float, float]
@@ -105,6 +106,39 @@ def generate_sine_curves(
     return curves
 
 
+def plot_curves(curves: list[list[Point2D]]) -> None:
+    """
+    曲線群を matplotlib で表示します。
+    各曲線は異なる色で描画されます。
+    """
+    if not curves:
+        raise ValueError("表示する曲線がありません。")
+
+    cmap = plt.get_cmap("viridis", len(curves))
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    for i, curve in enumerate(curves):
+        arr = np.asarray(curve, dtype=float)
+        ax.plot(
+            arr[:, 0],
+            arr[:, 1],
+            color=cmap(i),
+            linewidth=1.5,
+            label=f"curve {i + 1}" if i < 10 else None,
+        )
+
+    ax.set_title("Generated Sine Curves")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True, alpha=0.3)
+
+    if len(curves) <= 10:
+        ax.legend(loc="best")
+
+    plt.tight_layout()
+    plt.show()
+
+
 def main() -> None:
     # 実験用サンプル
     curve_a = [
@@ -125,6 +159,8 @@ def main() -> None:
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
+
+    plot_curves(curves)
 
 
 if __name__ == "__main__":

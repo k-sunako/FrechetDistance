@@ -197,6 +197,7 @@ def generate_various_curves(
 ) -> list[list[Point2D]]:
     """
     正弦波・矩形波・ノコギリ波をそれぞれ指定数ずつ生成します。
+    各タイプ内の3本は、同一の元曲線を回転角だけ変えたものにします。
     """
     if num_each_type < 1:
         raise ValueError("num_each_type は 1 以上で指定してください。")
@@ -208,19 +209,25 @@ def generate_various_curves(
     rng = np.random.default_rng(seed)
     curves: list[list[Point2D]] = []
 
-    generators = (
+    x_start_by_type = [
+        float(rng.uniform(x_start_min, x_start_max)),
+        float(rng.uniform(x_start_min, x_start_max)),
+        float(rng.uniform(x_start_min, x_start_max)),
+    ]
+
+    base_generators = (
         generate_sine_curve,
         generate_square_curve,
         generate_sawtooth_curve,
     )
 
-    for type_index, generator in enumerate(generators):
-        for i in range(num_each_type):
-            x_start = float(rng.uniform(x_start_min, x_start_max))
-            offset = (type_index * num_each_type + i) * offset_step
-            phase = (type_index * num_each_type + i) * phase_step
-            rotation = (type_index * num_each_type + i) * rotation_step
+    for type_index, generator in enumerate(base_generators):
+        x_start = x_start_by_type[type_index]
+        offset = type_index * offset_step
+        phase = type_index * phase_step
 
+        for i in range(num_each_type):
+            rotation = i * rotation_step
             curve = generator(
                 num_points=num_points,
                 amplitude=amplitude,
@@ -400,7 +407,6 @@ def plot_clustering_threshold_sweep(
 
 
 def main() -> None:
-    # 実験用サンプル
     curve_a = [
         (0.0, 0.0),
         (1.0, 1.0),

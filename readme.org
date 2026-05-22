@@ -1,0 +1,67 @@
+* Fréchet距離の計算と曲線クラスタリング
+
+このリポジトリでは、2次元曲線の discrete Fréchet 距離を計算し、その距離を用いて曲線群をクラスタリングする実験を行います。
+
+** できること
+
+- 2次元曲線同士の discrete Fréchet 距離を算出
+- 正弦波ベースの曲線群を生成
+- 曲線群の全組み合わせで距離行列を作成
+- 距離行列を使って scikit-learn の SpectralClustering でクラスタリング
+- matplotlib で曲線群を色分けして表示
+
+** 実装の概要
+
+*** 1. discrete Fréchet 距離
+
+2次元の点列を入力として、再帰的な動的計画法で discrete Fréchet 距離を計算します。
+
+入力例:
+
+#+begin_src python
+[(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]
+#+end_src
+
+*** 2. 曲線群の生成
+
+正弦波をベースにした曲線を複数生成します。
+
+- 各曲線は長さ 2π の x 軸区間を持つ
+- 開始位置はランダム
+- y 値は正弦波にオフセットを加えて生成
+
+*** 3. 距離行列の作成
+
+生成した曲線群に対して、全ペアの discrete Fréchet 距離を計算し、対称な距離行列を作ります。
+
+*** 4. スペクトラルクラスタリング
+
+距離行列をそのままクラスタリング入力にはできないため、類似度行列に変換してから SpectralClustering を適用します。
+
+*** 5. 可視化
+
+クラスタラベルごとに色を分けて曲線を描画します。
+
+** 実行例
+
+#+begin_src python
+from main import generate_sine_curves, compute_all_pair_frechet_distances, cluster_curves_with_spectral_clustering
+
+curves = generate_sine_curves(num_curves=10, seed=42)
+distance_matrix = compute_all_pair_frechet_distances(curves)
+labels = cluster_curves_with_spectral_clustering(distance_matrix, n_clusters=3)
+#+end_src
+
+** 依存ライブラリ
+
+- Python 3.12+
+- numpy
+- matplotlib
+- scikit-learn
+- scipy
+
+** 補足
+
+- 曲線数を増やすと全組み合わせ距離計算が重くなります
+- discrete Fréchet 距離なので、連続 Fréchet 距離とは異なります
+- スペクトラルクラスタリングの結果は、類似度変換の仕方やクラスタ数に影響されます

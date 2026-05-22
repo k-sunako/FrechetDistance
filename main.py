@@ -77,7 +77,6 @@ def normalize_curve(
             )
             arr = arr @ rotation_matrix.T
 
-            # 方向の符号を揃えるため、主成分の x 成分が負なら反転する
             if arr[:, 0].mean() < 0:
                 arr[:, 0] *= -1.0
                 arr[:, 1] *= -1.0
@@ -96,12 +95,6 @@ def discrete_frechet_distance(
 ) -> float:
     """
     2次元曲線同士の discrete Fréchet 距離を計算します。
-
-    入力:
-        curve1, curve2: [(x, y), ...] のような点列
-
-    戻り値:
-        discrete Fréchet 距離
     """
     p = _as_point_array(curve1)
     q = _as_point_array(curve2)
@@ -150,14 +143,6 @@ def rotate_curve(
 ) -> list[Point2D]:
     """
     曲線を指定角度だけ回転させます。
-
-    Args:
-        curve: 回転対象の2次元曲線
-        angle_degrees: 回転角度（度）
-        center: 回転中心。None の場合は曲線の重心を使う
-
-    Returns:
-        回転後の曲線
     """
     arr = _as_point_array(curve)
 
@@ -381,13 +366,6 @@ def compute_all_pair_frechet_distances(
 ) -> np.ndarray:
     """
     曲線群を総当たりで比較し、距離行列を返します。
-
-    Args:
-        curves: 曲線群
-        normalize: True のとき正規化前処理を施してから距離を計算する
-
-    Returns:
-        shape=(n, n) の距離行列
     """
     if not curves:
         raise ValueError("比較する曲線がありません。")
@@ -415,15 +393,6 @@ def cluster_curves_with_hierarchical_clustering(
 ) -> np.ndarray:
     """
     距離行列を使って階層クラスタリングします。
-
-    Args:
-        distance_matrix: shape=(n, n) の距離行列
-        n_clusters: クラスタ数を指定する場合
-        distance_threshold: 距離しきい値で分割する場合
-        linkage_method: linkage の手法 ("average", "complete", "single" など)
-
-    Returns:
-        各曲線のクラスタラベル
     """
     if distance_matrix.ndim != 2 or distance_matrix.shape[0] != distance_matrix.shape[1]:
         raise ValueError("distance_matrix は正方行列である必要があります。")
@@ -442,11 +411,53 @@ def cluster_curves_with_hierarchical_clustering(
     return labels
 
 
+def find_distance_threshold_for_cluster_count(
+    distance_matrix: np.ndarray,
+    target_cluster_count: int,
+    linkage_method: str = "average",
+    candidate_count: int = 500,
+) -> float:
+    """
+    目標クラスタ数になるしきい値を探索します。
+    """
+    if target_cluster_count < 1:
+        raise ValueError("target_cluster_count は 1 以上で指定してください。")
+    if distance_matrix.ndim != 2 or distance_matrix.shape[0] != distance_matrix.shape[1]:
+        raise ValueError("distance_matrix は正方行列である必要があります。")
+
+    condensed = squareform(distance_matrix, checks=False)
+    Z = linkage(condensed, method=linkage_method)
+
+    if len(Z) == 0:
+        return 0.0
+
+    merge_distances = np.unique(Z[:, 2])
+    min_threshold = 0.0
+    max_threshold = float(merge_distances[-1] + 1e-9)
+
+    candidates = np.linspace(min_threshold, max_threshold, candidate_count)
+
+    best_threshold = float(candidates[0])
+    best_diff = float("inf")
+
+    for threshold in candidates:
+        labels = fcluster(Z, t=float(threshold), criterion="distance")
+        cluster_count = len(set(int(x) for x in labels))
+        diff = abs(cluster_count - target_cluster_count)
+
+        if diff < best_diff:
+            best_diff = diff
+            best_threshold = float(threshold)
+
+        if cluster_count == target_cluster_count:
+            return float(threshold)
+
+    return best_threshold
+
+
 def plot_curves(curves: list[list[Point2D]], labels: np.ndarray | None = None) -> None:
     """
     曲線群を matplotlib で表示します。
-
-    labels が与えられた場合はクラスタごとに色分けします。
     """
     if not curves:
         raise ValueError("表示する曲線がありません。")
@@ -498,7 +509,6 @@ def plot_clustering_threshold_sweep(
 ) -> None:
     """
     複数のしきい値で階層クラスタリングした結果をサブプロットで一括表示します。
-    各サブプロットのタイトルにクラスタ数も表示します。
     """
     if not curves:
         raise ValueError("表示する曲線がありません。")
@@ -522,8 +532,7 @@ def plot_clustering_threshold_sweep(
     for idx, threshold in enumerate(thresholds):
         ax = axes[idx // n_cols][idx % n_cols]
         labels = fcluster(Z, t=threshold, criterion="distance")
-        unique_labels = sorted(set(int(x) for x in labels))
-        cluster_count = len(unique_labels)
+        cluster_count = len(set(int(x) for x in labels))
         cmap = plt.get_cmap("tab10", max(cluster_count, 1))
 
         for i, curve in enumerate(curves):
@@ -536,7 +545,7 @@ def plot_clustering_threshold_sweep(
                 linewidth=1.5,
             )
 
-        ax.set_title(f"distance_threshold = {threshold} / clusters = {cluster_count}")
+        ax.set_title(f"distance_threshold = {threshold:.4f} / clusters = {cluster_count}")
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.grid(True, alpha=0.3)
@@ -572,7 +581,20 @@ def main() -> None:
     print("pairwise distance matrix:")
     print(distance_matrix)
 
-    thresholds = np.linspace(0.5, 10.0, 4).tolist()
+    target_cluster_count = 3
+    threshold_for_three = find_distance_threshold_for_cluster_count(
+        distance_matrix,
+        target_cluster_count=target_cluster_count,
+        linkage_method="average",
+    )
+    print(f"threshold for {target_cluster_count} clusters: {threshold_for_three:.6f}")
+
+    thresholds = np.linspace(
+        max(0.0, threshold_for_three * 0.5),
+        threshold_for_three * 1.5 if threshold_for_three > 0 else 1.0,
+        4,
+    ).tolist()
+
     plot_clustering_threshold_sweep(
         curves,
         distance_matrix,

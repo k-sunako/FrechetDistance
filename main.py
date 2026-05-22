@@ -69,10 +69,6 @@ def normalize_curve(
     - rotate=True: PCA により主成分方向を x 軸へ揃える
     - unify_direction=True: 方向の反転を抑制する
     - scale=True: 全体スケールを標準化する
-
-    Notes:
-        これは厳密なアフィン不変化ではありませんが、
-        平行移動・回転・反転・スケール差の影響をさらに小さくできます。
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
@@ -96,7 +92,6 @@ def normalize_curve(
             arr = _rotate_array(arr, -angle)
 
     if unify_direction and len(arr) >= 2:
-        # 曲線の向きが逆でも同じように見えるよう、代表点で反転方向をそろえる
         start = arr[0]
         end = arr[-1]
         if (end[0] < start[0]) or (abs(end[0] - start[0]) < eps and end[1] < start[1]):
@@ -107,7 +102,6 @@ def normalize_curve(
         if scale_value > eps:
             arr = arr / scale_value
 
-    # 数値誤差を少し抑えるため、再度中心を揃える
     if center:
         arr = arr - arr.mean(axis=0)
 
@@ -300,15 +294,12 @@ def generate_various_curves(
     x_start_max: float = 10.0,
     rotation_step: float = 10.0,
     sawtooth_period: float = math.pi,
-    type_translation_dx: float = 8.0,
-    type_translation_dy: float = 6.0,
-    intra_type_translation_dx: float = 1.2,
-    intra_type_translation_dy: float = 0.8,
+    translate_range: float = 15.0,
     seed: int | None = None,
 ) -> list[list[Point2D]]:
     """
     正弦波・矩形波・ノコギリ波をそれぞれ指定数ずつ生成します。
-    各タイプ内の3本は、同一の元曲線を回転角と平行移動で変化させます。
+    種類のまとまりを弱めるため、各曲線にランダムな回転と平行移動を与えます。
     """
     if num_each_type < 1:
         raise ValueError("num_each_type は 1 以上で指定してください。")
@@ -318,69 +309,56 @@ def generate_various_curves(
         raise ValueError("x_start_min は x_start_max 以下で指定してください。")
     if sawtooth_period <= 0:
         raise ValueError("sawtooth_period は 0 より大きい値で指定してください。")
+    if translate_range < 0:
+        raise ValueError("translate_range は 0 以上で指定してください。")
 
     rng = np.random.default_rng(seed)
     curves: list[list[Point2D]] = []
 
-    x_start_by_type = [
-        float(rng.uniform(x_start_min, x_start_max)),
-        float(rng.uniform(x_start_min, x_start_max)),
-        float(rng.uniform(x_start_min, x_start_max)),
-    ]
+    generators = (
+        generate_sine_curve,
+        generate_square_curve,
+        generate_sawtooth_curve,
+    )
 
-    type_offsets = [
-        (0.0 * type_translation_dx, 0.0 * type_translation_dy),
-        (1.0 * type_translation_dx, 1.0 * type_translation_dy),
-        (2.0 * type_translation_dx, 2.0 * type_translation_dy),
-    ]
+    type_order = np.repeat(np.arange(3), num_each_type)
+    rng.shuffle(type_order)
 
-    for type_index in range(3):
-        x_start = x_start_by_type[type_index]
-        offset = type_index * offset_step
-        phase = type_index * phase_step
-        base_dx, base_dy = type_offsets[type_index]
+    for global_index, type_index in enumerate(type_order):
+        generator = generators[int(type_index)]
 
-        for i in range(num_each_type):
-            rotation = i * rotation_step
-            intra_dx = i * intra_type_translation_dx
-            intra_dy = i * intra_type_translation_dy
+        x_start = float(rng.uniform(x_start_min, x_start_max))
+        offset = float(rng.uniform(-offset_step * 3.0, offset_step * 3.0))
+        phase = float(rng.uniform(-phase_step * math.pi, phase_step * math.pi))
+        rotation = float(rng.uniform(-rotation_step, rotation_step))
+        translate_dx = float(rng.uniform(-translate_range, translate_range))
+        translate_dy = float(rng.uniform(-translate_range, translate_range))
 
-            if type_index == 0:
-                curve = generate_sine_curve(
-                    num_points=num_points,
-                    amplitude=amplitude,
-                    offset=offset,
-                    phase=phase,
-                    x_start=x_start,
-                    rotation_degrees=rotation,
-                    translate_dx=base_dx + intra_dx,
-                    translate_dy=base_dy + intra_dy,
-                )
-            elif type_index == 1:
-                curve = generate_square_curve(
-                    num_points=num_points,
-                    amplitude=amplitude,
-                    offset=offset,
-                    phase=phase,
-                    x_start=x_start,
-                    rotation_degrees=rotation,
-                    translate_dx=base_dx + intra_dx,
-                    translate_dy=base_dy + intra_dy,
-                )
-            else:
-                curve = generate_sawtooth_curve(
-                    num_points=num_points,
-                    amplitude=amplitude,
-                    offset=offset,
-                    phase=phase,
-                    x_start=x_start,
-                    rotation_degrees=rotation,
-                    period=sawtooth_period,
-                    translate_dx=base_dx + intra_dx,
-                    translate_dy=base_dy + intra_dy,
-                )
+        if generator is generate_sawtooth_curve:
+            curve = generator(
+                num_points=num_points,
+                amplitude=amplitude,
+                offset=offset,
+                phase=phase,
+                x_start=x_start,
+                rotation_degrees=rotation,
+                period=sawtooth_period,
+                translate_dx=translate_dx,
+                translate_dy=translate_dy,
+            )
+        else:
+            curve = generator(
+                num_points=num_points,
+                amplitude=amplitude,
+                offset=offset,
+                phase=phase,
+                x_start=x_start,
+                rotation_degrees=rotation,
+                translate_dx=translate_dx,
+                translate_dy=translate_dy,
+            )
 
-            curves.append(curve)
+        curves.append(curve)
 
     return curves
 
@@ -597,12 +575,20 @@ def main() -> None:
     dist = discrete_frechet_distance(curve_a, curve_b)
     print(f"discrete Fréchet distance: {dist:.6f}")
 
-    curves = generate_various_curves(num_each_type=3, seed=42, sawtooth_period=math.pi / 2.0)
+    curves = generate_various_curves(
+        num_each_type=3,
+        seed=42,
+        sawtooth_period=math.pi / 4.0,
+        translate_range=20.0,
+        rotation_step=45.0,
+        offset_step=2.0,
+        phase_step=1.0,
+    )
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
 
-    distance_matrix = compute_all_pair_frechet_distances(curves, normalize=True)
+    distance_matrix = compute_all_pair_frechet_distances(curves, normalize=False)
     print("pairwise distance matrix:")
     print(distance_matrix)
 

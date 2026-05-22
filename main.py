@@ -21,6 +21,19 @@ def _as_point_array(curve: Sequence[Sequence[float]]) -> np.ndarray:
     return arr
 
 
+def translate_curve(
+    curve: Sequence[Sequence[float]],
+    dx: float = 0.0,
+    dy: float = 0.0,
+) -> list[Point2D]:
+    """
+    曲線を指定量だけ平行移動します。
+    """
+    arr = _as_point_array(curve)
+    translated = arr + np.array([dx, dy], dtype=float)
+    return [(float(x), float(y)) for x, y in translated]
+
+
 def discrete_frechet_distance(
     curve1: Sequence[Sequence[float]],
     curve2: Sequence[Sequence[float]],
@@ -115,6 +128,8 @@ def generate_sine_curve(
     phase: float = 0.0,
     x_start: float = 0.0,
     rotation_degrees: float = 0.0,
+    translate_dx: float = 0.0,
+    translate_dy: float = 0.0,
 ) -> list[Point2D]:
     """
     正弦波曲線を1本生成します。
@@ -129,6 +144,9 @@ def generate_sine_curve(
     if rotation_degrees != 0.0:
         curve = rotate_curve(curve, angle_degrees=rotation_degrees)
 
+    if translate_dx != 0.0 or translate_dy != 0.0:
+        curve = translate_curve(curve, dx=translate_dx, dy=translate_dy)
+
     return curve
 
 
@@ -139,6 +157,8 @@ def generate_square_curve(
     phase: float = 0.0,
     x_start: float = 0.0,
     rotation_degrees: float = 0.0,
+    translate_dx: float = 0.0,
+    translate_dy: float = 0.0,
 ) -> list[Point2D]:
     """
     矩形波曲線を1本生成します。
@@ -153,6 +173,9 @@ def generate_square_curve(
     if rotation_degrees != 0.0:
         curve = rotate_curve(curve, angle_degrees=rotation_degrees)
 
+    if translate_dx != 0.0 or translate_dy != 0.0:
+        curve = translate_curve(curve, dx=translate_dx, dy=translate_dy)
+
     return curve
 
 
@@ -164,6 +187,8 @@ def generate_sawtooth_curve(
     x_start: float = 0.0,
     rotation_degrees: float = 0.0,
     period: float = 2.0 * math.pi,
+    translate_dx: float = 0.0,
+    translate_dy: float = 0.0,
 ) -> list[Point2D]:
     """
     ノコギリ波曲線を1本生成します。
@@ -181,6 +206,9 @@ def generate_sawtooth_curve(
     if rotation_degrees != 0.0:
         curve = rotate_curve(curve, angle_degrees=rotation_degrees)
 
+    if translate_dx != 0.0 or translate_dy != 0.0:
+        curve = translate_curve(curve, dx=translate_dx, dy=translate_dy)
+
     return curve
 
 
@@ -194,11 +222,15 @@ def generate_various_curves(
     x_start_max: float = 10.0,
     rotation_step: float = 10.0,
     sawtooth_period: float = math.pi,
+    type_translation_dx: float = 8.0,
+    type_translation_dy: float = 6.0,
+    intra_type_translation_dx: float = 1.2,
+    intra_type_translation_dy: float = 0.8,
     seed: int | None = None,
 ) -> list[list[Point2D]]:
     """
     正弦波・矩形波・ノコギリ波をそれぞれ指定数ずつ生成します。
-    各タイプ内の3本は、同一の元曲線を回転角だけ変えたものにします。
+    各タイプ内の3本は、同一の元曲線を回転角と平行移動で変化させます。
     """
     if num_each_type < 1:
         raise ValueError("num_each_type は 1 以上で指定してください。")
@@ -218,13 +250,22 @@ def generate_various_curves(
         float(rng.uniform(x_start_min, x_start_max)),
     ]
 
+    type_offsets = [
+        (0.0 * type_translation_dx, 0.0 * type_translation_dy),
+        (1.0 * type_translation_dx, 1.0 * type_translation_dy),
+        (2.0 * type_translation_dx, 2.0 * type_translation_dy),
+    ]
+
     for type_index in range(3):
         x_start = x_start_by_type[type_index]
         offset = type_index * offset_step
         phase = type_index * phase_step
+        base_dx, base_dy = type_offsets[type_index]
 
         for i in range(num_each_type):
             rotation = i * rotation_step
+            intra_dx = i * intra_type_translation_dx
+            intra_dy = i * intra_type_translation_dy
 
             if type_index == 0:
                 curve = generate_sine_curve(
@@ -234,6 +275,8 @@ def generate_various_curves(
                     phase=phase,
                     x_start=x_start,
                     rotation_degrees=rotation,
+                    translate_dx=base_dx + intra_dx,
+                    translate_dy=base_dy + intra_dy,
                 )
             elif type_index == 1:
                 curve = generate_square_curve(
@@ -243,6 +286,8 @@ def generate_various_curves(
                     phase=phase,
                     x_start=x_start,
                     rotation_degrees=rotation,
+                    translate_dx=base_dx + intra_dx,
+                    translate_dy=base_dy + intra_dy,
                 )
             else:
                 curve = generate_sawtooth_curve(
@@ -253,6 +298,8 @@ def generate_various_curves(
                     x_start=x_start,
                     rotation_degrees=rotation,
                     period=sawtooth_period,
+                    translate_dx=base_dx + intra_dx,
+                    translate_dy=base_dy + intra_dy,
                 )
 
             curves.append(curve)

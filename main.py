@@ -280,6 +280,62 @@ def plot_curves(curves: list[list[Point2D]], labels: np.ndarray | None = None) -
     plt.show()
 
 
+def plot_clustering_threshold_sweep(
+    curves: list[list[Point2D]],
+    distance_matrix: np.ndarray,
+    thresholds: Sequence[float],
+    linkage_method: str = "average",
+) -> None:
+    """
+    複数のしきい値で階層クラスタリングした結果をサブプロットで一括表示します。
+    """
+    if not curves:
+        raise ValueError("表示する曲線がありません。")
+    if len(thresholds) < 1:
+        raise ValueError("thresholds は1つ以上指定してください。")
+
+    condensed = squareform(distance_matrix, checks=False)
+    Z = linkage(condensed, method=linkage_method)
+
+    n_plots = len(thresholds)
+    n_cols = min(2, n_plots)
+    n_rows = (n_plots + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(8 * n_cols, 6 * n_rows),
+        squeeze=False,
+    )
+
+    for idx, threshold in enumerate(thresholds):
+        ax = axes[idx // n_cols][idx % n_cols]
+        labels = fcluster(Z, t=threshold, criterion="distance")
+        unique_labels = sorted(set(int(x) for x in labels))
+        cmap = plt.get_cmap("tab10", max(len(unique_labels), 1))
+
+        for i, curve in enumerate(curves):
+            label = int(labels[i])
+            arr = np.asarray(curve, dtype=float)
+            ax.plot(
+                arr[:, 0],
+                arr[:, 1],
+                color=cmap((label - 1) % 10),
+                linewidth=1.5,
+            )
+
+        ax.set_title(f"distance_threshold = {threshold}")
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.grid(True, alpha=0.3)
+
+    for idx in range(n_plots, n_rows * n_cols):
+        fig.delaxes(axes[idx // n_cols][idx % n_cols])
+
+    plt.tight_layout()
+    plt.show()
+
+
 def main() -> None:
     # 実験用サンプル
     curve_a = [
@@ -305,15 +361,13 @@ def main() -> None:
     print("pairwise distance matrix:")
     print(distance_matrix)
 
-    labels = cluster_curves_with_hierarchical_clustering(
+    thresholds = [0.8, 1.2, 1.6, 2.0]
+    plot_clustering_threshold_sweep(
+        curves,
         distance_matrix,
-        distance_threshold=2.0,
+        thresholds=thresholds,
+        linkage_method="average",
     )
-    print("cluster labels:")
-    for i, label in enumerate(labels):
-        print(f"curve[{i}] -> cluster {label}")
-
-    plot_curves(curves, labels=labels)
 
 
 if __name__ == "__main__":

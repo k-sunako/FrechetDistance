@@ -191,7 +191,7 @@ def main() -> None:
     dist = discrete_frechet_distance(curve_a, curve_b)
     print(f"discrete Fréchet distance: {dist:.6f}")
 
-    curves = generate_sine_curves(num_curves=100, seed=42)
+    curves = generate_sine_curves(num_curves=10, seed=42)
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")

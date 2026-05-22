@@ -102,11 +102,6 @@ def normalize_curve(
     - covariance_align=True: 共分散に基づく追加整列
     - unify_direction=True: 方向の反転を抑制する
     - scale=True: 全体スケールを標準化する
-
-    Notes:
-        これは厳密なアフィン不変化ではありませんが、
-        回転・平行移動・スケール差・軽微なせん断の影響を
-        以前より小さくできます。
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
@@ -182,6 +177,44 @@ def discrete_frechet_distance(
         return ca[i, j]
 
     return c(n - 1, m - 1)
+
+
+def dtw_distance(
+    curve1: Sequence[Sequence[float]],
+    curve2: Sequence[Sequence[float]],
+) -> float:
+    """
+    2次元曲線同士の DTW (Dynamic Time Warping) 距離を計算します。
+    """
+    p = _as_point_array(curve1)
+    q = _as_point_array(curve2)
+
+    n, m = len(p), len(q)
+    dp = np.full((n + 1, m + 1), np.inf, dtype=float)
+    dp[0, 0] = 0.0
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            cost = float(np.linalg.norm(p[i - 1] - q[j - 1]))
+            dp[i, j] = cost + min(
+                dp[i - 1, j],
+                dp[i, j - 1],
+                dp[i - 1, j - 1],
+            )
+
+    return float(dp[n, m])
+
+
+def normalized_dtw_distance(
+    curve1: Sequence[Sequence[float]],
+    curve2: Sequence[Sequence[float]],
+) -> float:
+    """
+    正規化前処理を施したうえで DTW 距離を計算します。
+    """
+    norm1 = normalize_curve(curve1)
+    norm2 = normalize_curve(curve2)
+    return dtw_distance(norm1, norm2)
 
 
 def normalized_discrete_frechet_distance(
@@ -404,8 +437,9 @@ def generate_various_curves(
     return curves
 
 
-def compute_all_pair_frechet_distances(
+def compute_all_pair_distances(
     curves: list[list[Point2D]],
+    metric: str = "frechet",
     normalize: bool = False,
 ) -> np.ndarray:
     """
@@ -414,15 +448,27 @@ def compute_all_pair_frechet_distances(
     if not curves:
         raise ValueError("比較する曲線がありません。")
 
+    metric = metric.lower()
+    if metric not in {"frechet", "dtw"}:
+        raise ValueError("metric は 'frechet' または 'dtw' を指定してください。")
+
     n = len(curves)
     distances = np.zeros((n, n), dtype=float)
 
     for i in range(n):
         for j in range(i + 1, n):
-            if normalize:
-                dist = normalized_discrete_frechet_distance(curves[i], curves[j])
+            if metric == "frechet":
+                dist = (
+                    normalized_discrete_frechet_distance(curves[i], curves[j])
+                    if normalize
+                    else discrete_frechet_distance(curves[i], curves[j])
+                )
             else:
-                dist = discrete_frechet_distance(curves[i], curves[j])
+                dist = (
+                    normalized_dtw_distance(curves[i], curves[j])
+                    if normalize
+                    else dtw_distance(curves[i], curves[j])
+                )
             distances[i, j] = dist
             distances[j, i] = dist
 
@@ -499,7 +545,11 @@ def find_distance_threshold_for_cluster_count(
     return best_threshold
 
 
-def plot_curves(curves: list[list[Point2D]], labels: np.ndarray | None = None) -> None:
+def plot_curves(
+    curves: list[list[Point2D]],
+    labels: np.ndarray | None = None,
+    title: str = "Generated Curves",
+) -> None:
     """
     曲線群を matplotlib で表示します。
     """
@@ -536,7 +586,7 @@ def plot_curves(curves: list[list[Point2D]], labels: np.ndarray | None = None) -
             )
         ax.legend(loc="best")
 
-    ax.set_title("Generated Curves")
+    ax.set_title(title)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.grid(True, alpha=0.3)
@@ -550,6 +600,7 @@ def plot_clustering_threshold_sweep(
     distance_matrix: np.ndarray,
     thresholds: Sequence[float],
     linkage_method: str = "average",
+    title_prefix: str = "distance_threshold",
 ) -> None:
     """
     複数のしきい値で階層クラスタリングした結果をサブプロットで一括表示します。
@@ -589,7 +640,7 @@ def plot_clustering_threshold_sweep(
                 linewidth=1.5,
             )
 
-        ax.set_title(f"distance_threshold = {threshold:.4f} / clusters = {cluster_count}")
+        ax.set_title(f"{title_prefix} = {threshold:.4f} / clusters = {cluster_count}")
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.grid(True, alpha=0.3)
@@ -613,8 +664,10 @@ def main() -> None:
         (2.0, 0.0),
     ]
 
-    dist = discrete_frechet_distance(curve_a, curve_b)
-    print(f"discrete Fréchet distance: {dist:.6f}")
+    frechet_dist = discrete_frechet_distance(curve_a, curve_b)
+    dtw_dist = dtw_distance(curve_a, curve_b)
+    print(f"discrete Fréchet distance: {frechet_dist:.6f}")
+    print(f"DTW distance: {dtw_dist:.6f}")
 
     curves = generate_various_curves(
         num_each_type=3,
@@ -629,29 +682,61 @@ def main() -> None:
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
 
-    distance_matrix = compute_all_pair_frechet_distances(curves, normalize=False)
-    print("pairwise distance matrix:")
-    print(distance_matrix)
+    frechet_distance_matrix = compute_all_pair_distances(
+        curves,
+        metric="frechet",
+        normalize=False,
+    )
+    dtw_distance_matrix = compute_all_pair_distances(
+        curves,
+        metric="dtw",
+        normalize=False,
+    )
+
+    print("pairwise Fréchet distance matrix:")
+    print(frechet_distance_matrix)
+    print("pairwise DTW distance matrix:")
+    print(dtw_distance_matrix)
 
     target_cluster_count = 3
-    threshold_for_three = find_distance_threshold_for_cluster_count(
-        distance_matrix,
+    frechet_threshold = find_distance_threshold_for_cluster_count(
+        frechet_distance_matrix,
         target_cluster_count=target_cluster_count,
         linkage_method="average",
     )
-    print(f"threshold for {target_cluster_count} clusters: {threshold_for_three:.6f}")
+    dtw_threshold = find_distance_threshold_for_cluster_count(
+        dtw_distance_matrix,
+        target_cluster_count=target_cluster_count,
+        linkage_method="average",
+    )
 
-    thresholds = np.linspace(
-        max(0.0, threshold_for_three * 0.5),
-        threshold_for_three * 1.5 if threshold_for_three > 0 else 1.0,
+    print(f"threshold for {target_cluster_count} clusters (Fréchet): {frechet_threshold:.6f}")
+    print(f"threshold for {target_cluster_count} clusters (DTW): {dtw_threshold:.6f}")
+
+    frechet_thresholds = np.linspace(
+        max(0.0, frechet_threshold * 0.5),
+        frechet_threshold * 1.5 if frechet_threshold > 0 else 1.0,
+        4,
+    ).tolist()
+    dtw_thresholds = np.linspace(
+        max(0.0, dtw_threshold * 0.5),
+        dtw_threshold * 1.5 if dtw_threshold > 0 else 1.0,
         4,
     ).tolist()
 
     plot_clustering_threshold_sweep(
         curves,
-        distance_matrix,
-        thresholds=thresholds,
+        frechet_distance_matrix,
+        thresholds=frechet_thresholds,
         linkage_method="average",
+        title_prefix="Fréchet threshold",
+    )
+    plot_clustering_threshold_sweep(
+        curves,
+        dtw_distance_matrix,
+        thresholds=dtw_thresholds,
+        linkage_method="average",
+        title_prefix="DTW threshold",
     )
 
 

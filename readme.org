@@ -5,6 +5,7 @@
 ** できること
 
 - 2次元曲線同士の discrete Fréchet 距離を算出
+- 2次元曲線同士の DTW 距離を算出
 - 正弦波・矩形波・ノコギリ波の3種類の曲線を生成
 - 各種類の曲線に回転・平行移動を適用
 - 曲線群を正規化して比較しやすくする
@@ -12,6 +13,7 @@
 - 距離行列を使って階層クラスタリングを実施
 - 目標クラスタ数になるしきい値を自動探索
 - 複数のしきい値に対するクラスタリング結果をサブプロットで一括表示
+- Fréchet距離版と DTW 版を比較表示
 - matplotlib で曲線群を色分けして表示
 
 ** 実装の概要
@@ -26,7 +28,15 @@
 [(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]
 #+end_src
 
-*** 2. 曲線群の生成
+*** 2. DTW 距離
+
+2次元の点列同士について、動的時間伸縮法 (DTW) で距離を計算します。
+
+- サンプル数の違いを吸収しやすい
+- 曲線の点対応を柔軟に取れる
+- Fréchet距離とは異なる挙動を示す
+
+*** 3. 曲線群の生成
 
 正弦波・矩形波・ノコギリ波をそれぞれ3本ずつ生成します。
 
@@ -34,10 +44,11 @@
 - 曲線ごとに回転角を変える
 - 曲線群全体をタイプごと・曲線ごとに平行移動して距離を離す
 - ノコギリ波は周期を短くして、より細かくぎざぎざした形にする
+- 生成順はランダムにシャッフルされ、種類が混ざるようにしている
 
-*** 3. 正規化前処理
+*** 4. 正規化前処理
 
-Fréchet距離の前に、曲線を比較しやすくするための正規化を行います。
+Fréchet距離や DTW の前に、曲線を比較しやすくするための正規化を行います。
 
 - 重心を原点へ移動
 - 最初の点の向きを揃える
@@ -48,13 +59,16 @@ Fréchet距離の前に、曲線を比較しやすくするための正規化を
 
 これにより、平行移動・回転・反転・スケール差・軽微なせん断の影響を小さくします。
 
-*** 4. 距離行列の作成
+*** 5. 距離行列の作成
 
-生成した曲線群に対して、全ペアの discrete Fréchet 距離を計算し、対称な距離行列を作ります。
+生成した曲線群に対して、全ペアの距離を計算し、対称な距離行列を作ります。
 
-正規化前処理を有効にした距離計算も可能です。
+- Fréchet距離行列
+- DTW距離行列
 
-*** 5. 階層クラスタリング
+の両方を比較できます。
+
+*** 6. 階層クラスタリング
 
 距離行列をそのまま使って階層クラスタリングを行います。
 
@@ -62,7 +76,7 @@ Fréchet距離の前に、曲線を比較しやすくするための正規化を
 - `distance_threshold` を指定して、事前にクラスタ数を決めずに分割することも可能
 - `average` linkage をデフォルトとして採用
 
-*** 6. クラスタ数3のしきい値探索
+*** 7. クラスタ数3のしきい値探索
 
 距離行列から、クラスタ数が3になるしきい値を探索できます。
 
@@ -70,12 +84,13 @@ Fréchet距離の前に、曲線を比較しやすくするための正規化を
 - 目標クラスタ数に最も近い値を選ぶ
 - 実際に3クラスタになる値が見つかればそれを採用
 
-*** 7. 可視化
+*** 8. 可視化
 
 クラスタラベルごとに色を分けて曲線を描画します。
 
 - 単一のクラスタリング結果を表示可能
 - 複数しきい値の結果をサブプロットで一括表示可能
+- Fréchet距離版と DTW 版を別々に表示して比較可能
 - 各サブプロットにはクラスタ数も表示
 
 ** 実行例
@@ -83,22 +98,22 @@ Fréchet距離の前に、曲線を比較しやすくするための正規化を
 #+begin_src python
 from main import (
     generate_various_curves,
-    compute_all_pair_frechet_distances,
-    cluster_curves_with_hierarchical_clustering,
+    compute_all_pair_distances,
     find_distance_threshold_for_cluster_count,
 )
 
 curves = generate_various_curves(num_each_type=3, seed=42, sawtooth_period=1.57079632679)
-distance_matrix = compute_all_pair_frechet_distances(curves, normalize=True)
 
-threshold = find_distance_threshold_for_cluster_count(
-    distance_matrix,
+frechet_distance_matrix = compute_all_pair_distances(curves, metric="frechet", normalize=False)
+dtw_distance_matrix = compute_all_pair_distances(curves, metric="dtw", normalize=False)
+
+frechet_threshold = find_distance_threshold_for_cluster_count(
+    frechet_distance_matrix,
     target_cluster_count=3,
 )
-
-labels = cluster_curves_with_hierarchical_clustering(
-    distance_matrix,
-    distance_threshold=threshold,
+dtw_threshold = find_distance_threshold_for_cluster_count(
+    dtw_distance_matrix,
+    target_cluster_count=3,
 )
 #+end_src
 
@@ -113,6 +128,7 @@ labels = cluster_curves_with_hierarchical_clustering(
 
 - 曲線数を増やすと全組み合わせ距離計算が重くなります
 - discrete Fréchet 距離なので、連続 Fréchet 距離とは異なります
+- DTW は曲線の対応を柔軟に取れますが、距離の解釈が Fréchet とは異なります
 - 正規化前処理は厳密なアフィン不変ではありません
 - 階層クラスタリングでは、距離しきい値の選び方で結果が変わります
 - 曲線の生成方法や平行移動量、回転角、正規化の強さによってクラスタ結果は変化します

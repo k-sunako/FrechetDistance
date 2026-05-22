@@ -163,6 +163,7 @@ def generate_sawtooth_curve(
     phase: float = 0.0,
     x_start: float = 0.0,
     rotation_degrees: float = 0.0,
+    period: float = 2.0 * math.pi,
 ) -> list[Point2D]:
     """
     ノコギリ波曲線を1本生成します。
@@ -170,7 +171,6 @@ def generate_sawtooth_curve(
     x_end = x_start + 2.0 * math.pi
     x_values = np.linspace(x_start, x_end, num_points)
 
-    period = 2.0 * math.pi
     shifted = x_values + phase
     saw = 2.0 * ((shifted / period) - np.floor(0.5 + shifted / period))
     curve = [
@@ -193,6 +193,7 @@ def generate_various_curves(
     x_start_min: float = 0.0,
     x_start_max: float = 10.0,
     rotation_step: float = 10.0,
+    sawtooth_period: float = math.pi,
     seed: int | None = None,
 ) -> list[list[Point2D]]:
     """
@@ -205,6 +206,8 @@ def generate_various_curves(
         raise ValueError("num_points は 2 以上で指定してください。")
     if x_start_min > x_start_max:
         raise ValueError("x_start_min は x_start_max 以下で指定してください。")
+    if sawtooth_period <= 0:
+        raise ValueError("sawtooth_period は 0 より大きい値で指定してください。")
 
     rng = np.random.default_rng(seed)
     curves: list[list[Point2D]] = []
@@ -215,27 +218,43 @@ def generate_various_curves(
         float(rng.uniform(x_start_min, x_start_max)),
     ]
 
-    base_generators = (
-        generate_sine_curve,
-        generate_square_curve,
-        generate_sawtooth_curve,
-    )
-
-    for type_index, generator in enumerate(base_generators):
+    for type_index in range(3):
         x_start = x_start_by_type[type_index]
         offset = type_index * offset_step
         phase = type_index * phase_step
 
         for i in range(num_each_type):
             rotation = i * rotation_step
-            curve = generator(
-                num_points=num_points,
-                amplitude=amplitude,
-                offset=offset,
-                phase=phase,
-                x_start=x_start,
-                rotation_degrees=rotation,
-            )
+
+            if type_index == 0:
+                curve = generate_sine_curve(
+                    num_points=num_points,
+                    amplitude=amplitude,
+                    offset=offset,
+                    phase=phase,
+                    x_start=x_start,
+                    rotation_degrees=rotation,
+                )
+            elif type_index == 1:
+                curve = generate_square_curve(
+                    num_points=num_points,
+                    amplitude=amplitude,
+                    offset=offset,
+                    phase=phase,
+                    x_start=x_start,
+                    rotation_degrees=rotation,
+                )
+            else:
+                curve = generate_sawtooth_curve(
+                    num_points=num_points,
+                    amplitude=amplitude,
+                    offset=offset,
+                    phase=phase,
+                    x_start=x_start,
+                    rotation_degrees=rotation,
+                    period=sawtooth_period,
+                )
+
             curves.append(curve)
 
     return curves
@@ -421,7 +440,7 @@ def main() -> None:
     dist = discrete_frechet_distance(curve_a, curve_b)
     print(f"discrete Fréchet distance: {dist:.6f}")
 
-    curves = generate_various_curves(num_each_type=3, seed=42)
+    curves = generate_various_curves(num_each_type=3, seed=42, sawtooth_period=math.pi / 2.0)
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
@@ -430,7 +449,7 @@ def main() -> None:
     print("pairwise distance matrix:")
     print(distance_matrix)
 
-    thresholds = [0.5, 2.0, 5.0, 10.0]
+    thresholds = np.linspace(0.5, 10.0, 10).tolist()
     plot_clustering_threshold_sweep(
         curves,
         distance_matrix,

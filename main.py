@@ -288,6 +288,7 @@ def plot_clustering_threshold_sweep(
 ) -> None:
     """
     複数のしきい値で階層クラスタリングした結果をサブプロットで一括表示します。
+    各サブプロットのタイトルにクラスタ数も表示します。
     """
     if not curves:
         raise ValueError("表示する曲線がありません。")
@@ -312,7 +313,8 @@ def plot_clustering_threshold_sweep(
         ax = axes[idx // n_cols][idx % n_cols]
         labels = fcluster(Z, t=threshold, criterion="distance")
         unique_labels = sorted(set(int(x) for x in labels))
-        cmap = plt.get_cmap("tab10", max(len(unique_labels), 1))
+        cluster_count = len(unique_labels)
+        cmap = plt.get_cmap("tab10", max(cluster_count, 1))
 
         for i, curve in enumerate(curves):
             label = int(labels[i])
@@ -324,7 +326,7 @@ def plot_clustering_threshold_sweep(
                 linewidth=1.5,
             )
 
-        ax.set_title(f"distance_threshold = {threshold}")
+        ax.set_title(f"distance_threshold = {threshold} / clusters = {cluster_count}")
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         ax.grid(True, alpha=0.3)

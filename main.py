@@ -108,43 +108,98 @@ def rotate_curve(
     return [(float(x), float(y)) for x, y in rotated]
 
 
-def generate_sine_curves(
-    num_curves: int = 10,
+def generate_sine_curve(
     num_points: int = 200,
     amplitude: float = 1.0,
-    offset_step: float = 0.1,
-    phase_step: float = 0.0,
+    offset: float = 0.0,
+    phase: float = 0.0,
+    x_start: float = 0.0,
+    rotation_degrees: float = 0.0,
+) -> list[Point2D]:
+    """
+    正弦波曲線を1本生成します。
+    """
+    x_end = x_start + 2.0 * math.pi
+    x_values = np.linspace(x_start, x_end, num_points)
+    curve = [
+        (float(x), float(amplitude * math.sin(x + phase) + offset))
+        for x in x_values
+    ]
+
+    if rotation_degrees != 0.0:
+        curve = rotate_curve(curve, angle_degrees=rotation_degrees)
+
+    return curve
+
+
+def generate_square_curve(
+    num_points: int = 200,
+    amplitude: float = 1.0,
+    offset: float = 0.0,
+    phase: float = 0.0,
+    x_start: float = 0.0,
+    rotation_degrees: float = 0.0,
+) -> list[Point2D]:
+    """
+    矩形波曲線を1本生成します。
+    """
+    x_end = x_start + 2.0 * math.pi
+    x_values = np.linspace(x_start, x_end, num_points)
+    curve = [
+        (float(x), float(amplitude * np.sign(math.sin(x + phase)) + offset))
+        for x in x_values
+    ]
+
+    if rotation_degrees != 0.0:
+        curve = rotate_curve(curve, angle_degrees=rotation_degrees)
+
+    return curve
+
+
+def generate_sawtooth_curve(
+    num_points: int = 200,
+    amplitude: float = 1.0,
+    offset: float = 0.0,
+    phase: float = 0.0,
+    x_start: float = 0.0,
+    rotation_degrees: float = 0.0,
+) -> list[Point2D]:
+    """
+    ノコギリ波曲線を1本生成します。
+    """
+    x_end = x_start + 2.0 * math.pi
+    x_values = np.linspace(x_start, x_end, num_points)
+
+    period = 2.0 * math.pi
+    shifted = x_values + phase
+    saw = 2.0 * ((shifted / period) - np.floor(0.5 + shifted / period))
+    curve = [
+        (float(x), float(amplitude * y + offset))
+        for x, y in zip(x_values, saw, strict=True)
+    ]
+
+    if rotation_degrees != 0.0:
+        curve = rotate_curve(curve, angle_degrees=rotation_degrees)
+
+    return curve
+
+
+def generate_various_curves(
+    num_each_type: int = 3,
+    num_points: int = 200,
+    amplitude: float = 1.0,
+    offset_step: float = 0.3,
+    phase_step: float = 0.4,
     x_start_min: float = 0.0,
     x_start_max: float = 10.0,
-    rotation_step: float = 0.0,
+    rotation_step: float = 10.0,
     seed: int | None = None,
 ) -> list[list[Point2D]]:
     """
-    正弦波をオフセットした2次元曲線を複数生成します。
-
-    各曲線は x 軸方向に長さ 2pi の区間を持ち、
-    開始位置は曲線ごとにランダムに変わります。
-
-    それぞれの曲線は以下で生成します:
-        x in [x_start, x_start + 2pi]
-        y = amplitude * sin(x + phase) + offset
-
-    Args:
-        num_curves: 生成する曲線数
-        num_points: 1曲線あたりの点数
-        amplitude: 正弦波の振幅
-        offset_step: 曲線ごとの y オフセット増分
-        phase_step: 曲線ごとの位相差増分
-        x_start_min: ランダムな x 開始位置の最小値
-        x_start_max: ランダムな x 開始位置の最大値
-        rotation_step: 曲線ごとの回転角度増分（度）
-        seed: 乱数シード
-
-    Returns:
-        曲線のリスト
+    正弦波・矩形波・ノコギリ波をそれぞれ指定数ずつ生成します。
     """
-    if num_curves < 1:
-        raise ValueError("num_curves は 1 以上で指定してください。")
+    if num_each_type < 1:
+        raise ValueError("num_each_type は 1 以上で指定してください。")
     if num_points < 2:
         raise ValueError("num_points は 2 以上で指定してください。")
     if x_start_min > x_start_max:
@@ -153,22 +208,28 @@ def generate_sine_curves(
     rng = np.random.default_rng(seed)
     curves: list[list[Point2D]] = []
 
-    for i in range(num_curves):
-        x_start = float(rng.uniform(x_start_min, x_start_max))
-        x_end = x_start + 2.0 * math.pi
-        x_values = np.linspace(x_start, x_end, num_points)
+    generators = (
+        generate_sine_curve,
+        generate_square_curve,
+        generate_sawtooth_curve,
+    )
 
-        offset = i * offset_step
-        phase = i * phase_step
-        curve = [
-            (float(x), float(amplitude * math.sin(x + phase) + offset))
-            for x in x_values
-        ]
+    for type_index, generator in enumerate(generators):
+        for i in range(num_each_type):
+            x_start = float(rng.uniform(x_start_min, x_start_max))
+            offset = (type_index * num_each_type + i) * offset_step
+            phase = (type_index * num_each_type + i) * phase_step
+            rotation = (type_index * num_each_type + i) * rotation_step
 
-        if rotation_step != 0.0:
-            curve = rotate_curve(curve, angle_degrees=i * rotation_step)
-
-        curves.append(curve)
+            curve = generator(
+                num_points=num_points,
+                amplitude=amplitude,
+                offset=offset,
+                phase=phase,
+                x_start=x_start,
+                rotation_degrees=rotation,
+            )
+            curves.append(curve)
 
     return curves
 
@@ -271,7 +332,7 @@ def plot_curves(curves: list[list[Point2D]], labels: np.ndarray | None = None) -
             )
         ax.legend(loc="best")
 
-    ax.set_title("Generated Sine Curves")
+    ax.set_title("Generated Curves")
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.grid(True, alpha=0.3)
@@ -354,7 +415,7 @@ def main() -> None:
     dist = discrete_frechet_distance(curve_a, curve_b)
     print(f"discrete Fréchet distance: {dist:.6f}")
 
-    curves = generate_sine_curves(num_curves=10, seed=42, rotation_step=10.0)
+    curves = generate_various_curves(num_each_type=3, seed=42)
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")

@@ -119,6 +119,29 @@ def generate_sine_curves(
     return curves
 
 
+def compute_all_pair_frechet_distances(
+    curves: list[list[Point2D]],
+) -> list[tuple[int, int, float]]:
+    """
+    曲線群を総当たりで比較し、全組み合わせの discrete Fréchet 距離を返します。
+
+    Returns:
+        (i, j, distance) のリスト
+    """
+    if not curves:
+        raise ValueError("比較する曲線がありません。")
+
+    results: list[tuple[int, int, float]] = []
+    n = len(curves)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = discrete_frechet_distance(curves[i], curves[j])
+            results.append((i, j, dist))
+
+    return results
+
+
 def plot_curves(curves: list[list[Point2D]]) -> None:
     """
     曲線群を matplotlib で表示します。
@@ -172,6 +195,11 @@ def main() -> None:
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
+
+    pairwise_distances = compute_all_pair_frechet_distances(curves)
+    print(f"pairwise comparisons: {len(pairwise_distances)}")
+    for i, j, d in pairwise_distances[:10]:
+        print(f"curve[{i}] vs curve[{j}]: {d:.6f}")
 
     plot_curves(curves)
 

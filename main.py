@@ -341,39 +341,6 @@ def generate_square_curve(
     return curve
 
 
-def generate_sawtooth_curve(
-    num_points: int = 200,
-    amplitude: float = 1.0,
-    offset: float = 0.0,
-    phase: float = 0.0,
-    x_start: float = 0.0,
-    rotation_degrees: float = 0.0,
-    period: float = 2.0 * math.pi,
-    translate_dx: float = 0.0,
-    translate_dy: float = 0.0,
-) -> list[Point2D]:
-    """
-    ノコギリ波曲線を1本生成します。
-    """
-    x_end = x_start + 2.0 * math.pi
-    x_values = np.linspace(x_start, x_end, num_points)
-
-    shifted = x_values + phase
-    saw = 2.0 * ((shifted / period) - np.floor(0.5 + shifted / period))
-    curve = [
-        (float(x), float(amplitude * y + offset))
-        for x, y in zip(x_values, saw, strict=True)
-    ]
-
-    if rotation_degrees != 0.0:
-        curve = rotate_curve(curve, angle_degrees=rotation_degrees)
-
-    if translate_dx != 0.0 or translate_dy != 0.0:
-        curve = translate_curve(curve, dx=translate_dx, dy=translate_dy)
-
-    return curve
-
-
 def generate_various_curves(
     num_each_type: int = 3,
     num_points: int = 200,
@@ -383,12 +350,11 @@ def generate_various_curves(
     x_start_min: float = 0.0,
     x_start_max: float = 10.0,
     rotation_step: float = 10.0,
-    sawtooth_period: float = math.pi,
     translate_range: float = 15.0,
     seed: int | None = None,
 ) -> list[list[Point2D]]:
     """
-    正弦波・矩形波・ノコギリ波をそれぞれ指定数ずつ生成します。
+    正弦波・矩形波をそれぞれ指定数ずつ生成します。
     種類のまとまりを弱めるため、各曲線にランダムな回転と平行移動を与えます。
     """
     if num_each_type < 1:
@@ -397,8 +363,6 @@ def generate_various_curves(
         raise ValueError("num_points は 2 以上で指定してください。")
     if x_start_min > x_start_max:
         raise ValueError("x_start_min は x_start_max 以下で指定してください。")
-    if sawtooth_period <= 0:
-        raise ValueError("sawtooth_period は 0 より大きい値で指定してください。")
     if translate_range < 0:
         raise ValueError("translate_range は 0 以上で指定してください。")
 
@@ -408,10 +372,9 @@ def generate_various_curves(
     generators = (
         generate_sine_curve,
         generate_square_curve,
-        generate_sawtooth_curve,
     )
 
-    type_order = np.repeat(np.arange(3), num_each_type)
+    type_order = np.repeat(np.arange(len(generators)), num_each_type)
     rng.shuffle(type_order)
 
     for type_index in type_order:
@@ -424,29 +387,16 @@ def generate_various_curves(
         translate_dx = float(rng.uniform(-translate_range, translate_range))
         translate_dy = float(rng.uniform(-translate_range, translate_range))
 
-        if generator is generate_sawtooth_curve:
-            curve = generator(
-                num_points=num_points,
-                amplitude=amplitude,
-                offset=offset,
-                phase=phase,
-                x_start=x_start,
-                rotation_degrees=rotation,
-                period=sawtooth_period,
-                translate_dx=translate_dx,
-                translate_dy=translate_dy,
-            )
-        else:
-            curve = generator(
-                num_points=num_points,
-                amplitude=amplitude,
-                offset=offset,
-                phase=phase,
-                x_start=x_start,
-                rotation_degrees=rotation,
-                translate_dx=translate_dx,
-                translate_dy=translate_dy,
-            )
+        curve = generator(
+            num_points=num_points,
+            amplitude=amplitude,
+            offset=offset,
+            phase=phase,
+            x_start=x_start,
+            rotation_degrees=rotation,
+            translate_dx=translate_dx,
+            translate_dy=translate_dy,
+        )
 
         curves.append(curve)
 
@@ -844,7 +794,6 @@ def main() -> None:
     curves = generate_various_curves(
         num_each_type=6,
         seed=42,
-        sawtooth_period=math.pi / 4.0,
         translate_range=20.0,
         rotation_step=45.0,
         offset_step=2.0,
@@ -865,7 +814,7 @@ def main() -> None:
     print("pairwise Fourier descriptor distance matrix:")
     print(distance_matrix)
 
-    target_cluster_count = 3
+    target_cluster_count = 2
     threshold = find_distance_threshold_for_cluster_count(
         distance_matrix,
         target_cluster_count=target_cluster_count,
@@ -899,7 +848,7 @@ def main() -> None:
     best_params, results = optimize_clustering_parameters(
         curves,
         param_grid=param_grid,
-        target_cluster_count=3,
+        target_cluster_count=2,
     )
     print("best params:")
     print(best_params)
@@ -917,7 +866,7 @@ def main() -> None:
         curves,
         num_coefficients=16,
         use_magnitude_only=False,
-        target_cluster_count=3,
+        target_cluster_count=2,
         linkage_method="average",
     )
 

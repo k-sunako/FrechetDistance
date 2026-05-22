@@ -61,6 +61,52 @@ def discrete_frechet_distance(
     return c(n - 1, m - 1)
 
 
+def rotate_curve(
+    curve: Sequence[Sequence[float]],
+    angle_degrees: float,
+    center: Sequence[float] | None = None,
+) -> list[Point2D]:
+    """
+    曲線を指定角度だけ回転させます。
+
+    Args:
+        curve: 回転対象の2次元曲線
+        angle_degrees: 回転角度（度）
+        center: 回転中心。None の場合は曲線の重心を使う
+
+    Returns:
+        回転後の曲線
+    """
+    arr = _as_point_array(curve)
+
+    if center is None:
+        cx = float(arr[:, 0].mean())
+        cy = float(arr[:, 1].mean())
+    else:
+        center_arr = np.asarray(center, dtype=float)
+        if center_arr.shape != (2,):
+            raise ValueError("center は長さ2の座標で指定してください。")
+        cx = float(center_arr[0])
+        cy = float(center_arr[1])
+
+    angle = math.radians(angle_degrees)
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+
+    translated = arr - np.array([cx, cy], dtype=float)
+    rotation_matrix = np.array(
+        [
+            [cos_a, -sin_a],
+            [sin_a, cos_a],
+        ],
+        dtype=float,
+    )
+    rotated = translated @ rotation_matrix.T
+    rotated += np.array([cx, cy], dtype=float)
+
+    return [(float(x), float(y)) for x, y in rotated]
+
+
 def generate_sine_curves(
     num_curves: int = 10,
     num_points: int = 200,
@@ -69,6 +115,7 @@ def generate_sine_curves(
     phase_step: float = 0.0,
     x_start_min: float = 0.0,
     x_start_max: float = 10.0,
+    rotation_step: float = 0.0,
     seed: int | None = None,
 ) -> list[list[Point2D]]:
     """
@@ -89,6 +136,7 @@ def generate_sine_curves(
         phase_step: 曲線ごとの位相差増分
         x_start_min: ランダムな x 開始位置の最小値
         x_start_max: ランダムな x 開始位置の最大値
+        rotation_step: 曲線ごとの回転角度増分（度）
         seed: 乱数シード
 
     Returns:
@@ -115,6 +163,10 @@ def generate_sine_curves(
             (float(x), float(amplitude * math.sin(x + phase) + offset))
             for x in x_values
         ]
+
+        if rotation_step != 0.0:
+            curve = rotate_curve(curve, angle_degrees=i * rotation_step)
+
         curves.append(curve)
 
     return curves
@@ -246,7 +298,7 @@ def main() -> None:
     dist = discrete_frechet_distance(curve_a, curve_b)
     print(f"discrete Fréchet distance: {dist:.6f}")
 
-    curves = generate_sine_curves(num_curves=10, seed=42)
+    curves = generate_sine_curves(num_curves=10, seed=42, rotation_step=10.0)
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")

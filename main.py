@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Sequence
 
 import math
@@ -32,249 +33,6 @@ def translate_curve(
     arr = _as_point_array(curve)
     translated = arr + np.array([dx, dy], dtype=float)
     return [(float(x), float(y)) for x, y in translated]
-
-
-def _rotate_array(arr: np.ndarray, angle_radians: float) -> np.ndarray:
-    """
-    numpy 配列の点列を原点周りに回転します。
-    """
-    cos_a = math.cos(angle_radians)
-    sin_a = math.sin(angle_radians)
-    rotation_matrix = np.array(
-        [
-            [cos_a, -sin_a],
-            [sin_a, cos_a],
-        ],
-        dtype=float,
-    )
-    return arr @ rotation_matrix.T
-
-
-def _normalize_by_covariance(
-    arr: np.ndarray,
-    eps: float = 1e-12,
-) -> np.ndarray:
-    """
-    共分散行列を使って、曲線の向きを安定化させます。
-    """
-    if len(arr) < 2:
-        return arr
-
-    cov = np.cov(arr.T)
-    if not np.all(np.isfinite(cov)) or cov.shape != (2, 2):
-        return arr
-
-    eigvals, eigvecs = np.linalg.eigh(cov)
-
-    # 主成分軸へ回転
-    principal = eigvecs[:, np.argmax(eigvals)]
-    angle = math.atan2(float(principal[1]), float(principal[0]))
-    arr = _rotate_array(arr, -angle)
-
-    # 縦横のスケール差を少し緩和
-    cov2 = np.cov(arr.T)
-    if np.all(np.isfinite(cov2)) and cov2.shape == (2, 2):
-        sx = math.sqrt(float(cov2[0, 0])) if cov2[0, 0] > eps else 1.0
-        sy = math.sqrt(float(cov2[1, 1])) if cov2[1, 1] > eps else 1.0
-        arr = arr / np.array([sx, sy], dtype=float)
-
-    return arr
-
-
-def normalize_curve(
-    curve: Sequence[Sequence[float]],
-    *,
-    center: bool = True,
-    align_first_point: bool = True,
-    rotate: bool = True,
-    scale: bool = True,
-    unify_direction: bool = True,
-    covariance_align: bool = True,
-    eps: float = 1e-12,
-) -> list[Point2D]:
-    """
-    曲線を正規化します。
-
-    強化版の正規化内容:
-    - center=True: 重心を原点へ移動
-    - align_first_point=True: 最初の点を x 軸の正方向に揃える
-    - rotate=True: PCA により主成分方向を x 軸へ揃える
-    - covariance_align=True: 共分散に基づく追加整列
-    - unify_direction=True: 方向の反転を抑制する
-    - scale=True: 全体スケールを標準化する
-    """
-    arr = _as_point_array(curve).astype(float, copy=True)
-
-    if center:
-        centroid = arr.mean(axis=0)
-        arr = arr - centroid
-
-    if align_first_point and len(arr) >= 2:
-        first_vec = arr[0]
-        norm = float(np.linalg.norm(first_vec))
-        if norm > eps:
-            angle = math.atan2(float(first_vec[1]), float(first_vec[0]))
-            arr = _rotate_array(arr, -angle)
-
-    if rotate and len(arr) >= 2:
-        cov = np.cov(arr.T)
-        if np.all(np.isfinite(cov)) and cov.shape == (2, 2):
-            eigvals, eigvecs = np.linalg.eigh(cov)
-            principal = eigvecs[:, np.argmax(eigvals)]
-            angle = math.atan2(float(principal[1]), float(principal[0]))
-            arr = _rotate_array(arr, -angle)
-
-    if covariance_align:
-        arr = _normalize_by_covariance(arr, eps=eps)
-
-    if unify_direction and len(arr) >= 2:
-        start = arr[0]
-        end = arr[-1]
-        if (end[0] < start[0]) or (abs(end[0] - start[0]) < eps and end[1] < start[1]):
-            arr = arr[::-1]
-
-    if scale:
-        scale_value = float(np.sqrt(np.mean(np.sum(arr ** 2, axis=1))))
-        if scale_value > eps:
-            arr = arr / scale_value
-
-    if center:
-        arr = arr - arr.mean(axis=0)
-
-    return [(float(x), float(y)) for x, y in arr]
-
-
-def discrete_frechet_distance(
-    curve1: Sequence[Sequence[float]],
-    curve2: Sequence[Sequence[float]],
-) -> float:
-    """
-    2次元曲線同士の discrete Fréchet 距離を計算します。
-    """
-    p = _as_point_array(curve1)
-    q = _as_point_array(curve2)
-
-    n, m = len(p), len(q)
-    ca = np.full((n, m), -1.0, dtype=float)
-
-    def c(i: int, j: int) -> float:
-        if ca[i, j] >= 0:
-            return ca[i, j]
-
-        dist = float(np.linalg.norm(p[i] - q[j]))
-
-        if i == 0 and j == 0:
-            ca[i, j] = dist
-        elif i == 0:
-            ca[i, j] = max(c(i, j - 1), dist)
-        elif j == 0:
-            ca[i, j] = max(c(i - 1, j), dist)
-        else:
-            ca[i, j] = max(
-                min(c(i - 1, j), c(i - 1, j - 1), c(i, j - 1)),
-                dist,
-            )
-        return ca[i, j]
-
-    return c(n - 1, m - 1)
-
-
-def dtw_distance(
-    curve1: Sequence[Sequence[float]],
-    curve2: Sequence[Sequence[float]],
-) -> float:
-    """
-    2次元曲線同士の DTW (Dynamic Time Warping) 距離を計算します。
-    """
-    p = _as_point_array(curve1)
-    q = _as_point_array(curve2)
-
-    n, m = len(p), len(q)
-    dp = np.full((n + 1, m + 1), np.inf, dtype=float)
-    dp[0, 0] = 0.0
-
-    for i in range(1, n + 1):
-        for j in range(1, m + 1):
-            cost = float(np.linalg.norm(p[i - 1] - q[j - 1]))
-            dp[i, j] = cost + min(
-                dp[i - 1, j],
-                dp[i, j - 1],
-                dp[i - 1, j - 1],
-            )
-
-    return float(dp[n, m])
-
-
-def normalized_dtw_distance(
-    curve1: Sequence[Sequence[float]],
-    curve2: Sequence[Sequence[float]],
-) -> float:
-    """
-    正規化前処理を施したうえで DTW 距離を計算します。
-    """
-    norm1 = normalize_curve(curve1)
-    norm2 = normalize_curve(curve2)
-    return dtw_distance(norm1, norm2)
-
-
-def normalized_discrete_frechet_distance(
-    curve1: Sequence[Sequence[float]],
-    curve2: Sequence[Sequence[float]],
-) -> float:
-    """
-    強化した正規化前処理を施したうえで discrete Fréchet 距離を計算します。
-    """
-    norm1 = normalize_curve(curve1)
-    norm2 = normalize_curve(curve2)
-    return discrete_frechet_distance(norm1, norm2)
-
-
-def fourier_descriptor(
-    curve: Sequence[Sequence[float]],
-    num_coefficients: int = 10,
-    normalize: bool = True,
-) -> np.ndarray:
-    """
-    曲線の Fourier 記述子を計算します。
-
-    曲線を複素数列 z = x + i y として扱い、
-    FFT の低周波成分を特徴量として取り出します。
-    """
-    arr = _as_point_array(curve).astype(float, copy=True)
-
-    if normalize:
-        arr = np.asarray(normalize_curve(arr), dtype=float)
-
-    if len(arr) < 2:
-        return np.zeros(num_coefficients * 2, dtype=float)
-
-    z = arr[:, 0] + 1j * arr[:, 1]
-    z = z - np.mean(z)
-
-    spectrum = np.fft.fft(z)
-    coeffs = spectrum[1 : num_coefficients + 1]
-
-    if coeffs.size < num_coefficients:
-        coeffs = np.pad(coeffs, (0, num_coefficients - coeffs.size), mode="constant")
-
-    if np.abs(coeffs[0]) > 1e-12:
-        coeffs = coeffs / np.abs(coeffs[0])
-
-    features = np.concatenate([coeffs.real, coeffs.imag]).astype(float)
-    return features
-
-
-def fourier_descriptor_distance(
-    curve1: Sequence[Sequence[float]],
-    curve2: Sequence[Sequence[float]],
-    num_coefficients: int = 10,
-) -> float:
-    """
-    Fourier 記述子同士の距離を計算します。
-    """
-    d1 = fourier_descriptor(curve1, num_coefficients=num_coefficients, normalize=True)
-    d2 = fourier_descriptor(curve2, num_coefficients=num_coefficients, normalize=True)
-    return float(np.linalg.norm(d1 - d2))
 
 
 def rotate_curve(
@@ -313,6 +71,104 @@ def rotate_curve(
     rotated += np.array([cx, cy], dtype=float)
 
     return [(float(x), float(y)) for x, y in rotated]
+
+
+def normalize_curve(
+    curve: Sequence[Sequence[float]],
+    *,
+    center: bool = True,
+    scale: bool = True,
+    eps: float = 1e-12,
+) -> list[Point2D]:
+    """
+    Fourier記述子用に曲線を正規化します。
+
+    - center=True: 重心を原点へ移動
+    - scale=True: 全体スケールを標準化する
+    """
+    arr = _as_point_array(curve).astype(float, copy=True)
+
+    if center:
+        arr = arr - arr.mean(axis=0)
+
+    if scale:
+        scale_value = float(np.sqrt(np.mean(np.sum(arr ** 2, axis=1))))
+        if scale_value > eps:
+            arr = arr / scale_value
+
+    return [(float(x), float(y)) for x, y in arr]
+
+
+def fourier_descriptor(
+    curve: Sequence[Sequence[float]],
+    num_coefficients: int = 16,
+    normalize: bool = True,
+    use_magnitude_only: bool = False,
+) -> np.ndarray:
+    """
+    曲線の Fourier 記述子を計算します。
+
+    曲線を複素数列 z = x + i y として扱い、
+    FFT の低周波成分を特徴量として取り出します。
+
+    Args:
+        curve: 2次元点列
+        num_coefficients: 使用する係数数
+        normalize: 重心移動とスケール正規化を行うか
+        use_magnitude_only: True の場合は係数の絶対値のみを使う
+
+    Returns:
+        1次元特徴量ベクトル
+    """
+    arr = _as_point_array(curve).astype(float, copy=True)
+
+    if normalize:
+        arr = _as_point_array(normalize_curve(arr))
+
+    if len(arr) < 2:
+        return np.zeros(num_coefficients, dtype=float)
+
+    z = arr[:, 0] + 1j * arr[:, 1]
+    z = z - np.mean(z)
+
+    spectrum = np.fft.fft(z)
+    coeffs = spectrum[1 : num_coefficients + 1]
+
+    if coeffs.size < num_coefficients:
+        coeffs = np.pad(coeffs, (0, num_coefficients - coeffs.size), mode="constant")
+
+    if use_magnitude_only:
+        features = np.abs(coeffs).astype(float)
+    else:
+        if np.abs(coeffs[0]) > 1e-12:
+            coeffs = coeffs / np.abs(coeffs[0])
+        features = np.concatenate([coeffs.real, coeffs.imag]).astype(float)
+
+    return features
+
+
+def fourier_descriptor_distance(
+    curve1: Sequence[Sequence[float]],
+    curve2: Sequence[Sequence[float]],
+    num_coefficients: int = 16,
+    use_magnitude_only: bool = False,
+) -> float:
+    """
+    Fourier 記述子同士のユークリッド距離を計算します。
+    """
+    d1 = fourier_descriptor(
+        curve1,
+        num_coefficients=num_coefficients,
+        normalize=True,
+        use_magnitude_only=use_magnitude_only,
+    )
+    d2 = fourier_descriptor(
+        curve2,
+        num_coefficients=num_coefficients,
+        normalize=True,
+        use_magnitude_only=use_magnitude_only,
+    )
+    return float(np.linalg.norm(d1 - d2))
 
 
 def generate_sine_curve(
@@ -487,43 +343,31 @@ def generate_various_curves(
 
 def compute_all_pair_distances(
     curves: list[list[Point2D]],
-    metric: str = "frechet",
-    normalize: bool = False,
-    fourier_num_coefficients: int = 10,
+    num_coefficients: int = 16,
+    use_magnitude_only: bool = False,
 ) -> np.ndarray:
     """
-    曲線群を総当たりで比較し、距離行列を返します。
+    Fourier 記述子による全ペア距離行列を作成します。
     """
     if not curves:
         raise ValueError("比較する曲線がありません。")
 
-    metric = metric.lower()
-    if metric not in {"frechet", "dtw", "fourier"}:
-        raise ValueError("metric は 'frechet'、'dtw'、'fourier' のいずれかを指定してください。")
-
     n = len(curves)
     distances = np.zeros((n, n), dtype=float)
 
+    descriptors = [
+        fourier_descriptor(
+            curve,
+            num_coefficients=num_coefficients,
+            normalize=True,
+            use_magnitude_only=use_magnitude_only,
+        )
+        for curve in curves
+    ]
+
     for i in range(n):
         for j in range(i + 1, n):
-            if metric == "frechet":
-                dist = (
-                    normalized_discrete_frechet_distance(curves[i], curves[j])
-                    if normalize
-                    else discrete_frechet_distance(curves[i], curves[j])
-                )
-            elif metric == "dtw":
-                dist = (
-                    normalized_dtw_distance(curves[i], curves[j])
-                    if normalize
-                    else dtw_distance(curves[i], curves[j])
-                )
-            else:
-                dist = fourier_descriptor_distance(
-                    curves[i],
-                    curves[j],
-                    num_coefficients=fourier_num_coefficients,
-                )
+            dist = float(np.linalg.norm(descriptors[i] - descriptors[j]))
             distances[i, j] = dist
             distances[j, i] = dist
 
@@ -652,150 +496,60 @@ def plot_curves(
 
 def plot_metric_comparison(
     curves: list[list[Point2D]],
-    metrics: Sequence[str] = ("frechet", "dtw", "fourier"),
-    normalize: bool = False,
-    fourier_num_coefficients: int = 10,
+    num_coefficients: int = 16,
+    use_magnitude_only: bool = False,
     target_cluster_count: int = 3,
     linkage_method: str = "average",
 ) -> None:
     """
-    複数の距離指標を並べて比較表示します。
+    Fourier記述子ベースの比較をサブプロットで表示します。
     """
     if not curves:
         raise ValueError("表示する曲線がありません。")
-    if len(metrics) < 1:
-        raise ValueError("metrics は1つ以上指定してください。")
 
-    n_plots = len(metrics)
-    n_cols = min(2, n_plots)
-    n_rows = (n_plots + n_cols - 1) // n_cols
-
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(8 * n_cols, 6 * n_rows),
-        squeeze=False,
+    distance_matrix = compute_all_pair_distances(
+        curves,
+        num_coefficients=num_coefficients,
+        use_magnitude_only=use_magnitude_only,
     )
-
-    for idx, metric in enumerate(metrics):
-        ax = axes[idx // n_cols][idx % n_cols]
-        distance_matrix = compute_all_pair_distances(
-            curves,
-            metric=metric,
-            normalize=normalize,
-            fourier_num_coefficients=fourier_num_coefficients,
-        )
-        threshold = find_distance_threshold_for_cluster_count(
-            distance_matrix,
-            target_cluster_count=target_cluster_count,
-            linkage_method=linkage_method,
-        )
-        labels = cluster_curves_with_hierarchical_clustering(
-            distance_matrix,
-            distance_threshold=threshold,
-            linkage_method=linkage_method,
-        )
-        cluster_count = len(set(int(x) for x in labels))
-        cmap = plt.get_cmap("tab10", max(cluster_count, 1))
-
-        for i, curve in enumerate(curves):
-            label = int(labels[i])
-            arr = np.asarray(curve, dtype=float)
-            ax.plot(
-                arr[:, 0],
-                arr[:, 1],
-                color=cmap((label - 1) % 10),
-                linewidth=1.5,
-            )
-
-        ax.set_title(f"{metric.upper()} / threshold={threshold:.4f} / clusters={cluster_count}")
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.grid(True, alpha=0.3)
-
-    for idx in range(n_plots, n_rows * n_cols):
-        fig.delaxes(axes[idx // n_cols][idx % n_cols])
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_clustering_threshold_sweep(
-    curves: list[list[Point2D]],
-    distance_matrix: np.ndarray,
-    thresholds: Sequence[float],
-    linkage_method: str = "average",
-    title_prefix: str = "distance_threshold",
-) -> None:
-    """
-    複数のしきい値で階層クラスタリングした結果をサブプロットで一括表示します。
-    """
-    if not curves:
-        raise ValueError("表示する曲線がありません。")
-    if len(thresholds) < 1:
-        raise ValueError("thresholds は1つ以上指定してください。")
-
-    condensed = squareform(distance_matrix, checks=False)
-    Z = linkage(condensed, method=linkage_method)
-
-    n_plots = len(thresholds)
-    n_cols = min(2, n_plots)
-    n_rows = (n_plots + n_cols - 1) // n_cols
-
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(8 * n_cols, 6 * n_rows),
-        squeeze=False,
+    threshold = find_distance_threshold_for_cluster_count(
+        distance_matrix,
+        target_cluster_count=target_cluster_count,
+        linkage_method=linkage_method,
     )
+    labels = cluster_curves_with_hierarchical_clustering(
+        distance_matrix,
+        distance_threshold=threshold,
+        linkage_method=linkage_method,
+    )
+    cluster_count = len(set(int(x) for x in labels))
 
-    for idx, threshold in enumerate(thresholds):
-        ax = axes[idx // n_cols][idx % n_cols]
-        labels = fcluster(Z, t=threshold, criterion="distance")
-        cluster_count = len(set(int(x) for x in labels))
-        cmap = plt.get_cmap("tab10", max(cluster_count, 1))
+    fig, ax = plt.subplots(figsize=(12, 8))
+    cmap = plt.get_cmap("tab10", max(cluster_count, 1))
 
-        for i, curve in enumerate(curves):
-            label = int(labels[i])
-            arr = np.asarray(curve, dtype=float)
-            ax.plot(
-                arr[:, 0],
-                arr[:, 1],
-                color=cmap((label - 1) % 10),
-                linewidth=1.5,
-            )
+    for i, curve in enumerate(curves):
+        label = int(labels[i])
+        arr = np.asarray(curve, dtype=float)
+        ax.plot(
+            arr[:, 0],
+            arr[:, 1],
+            color=cmap((label - 1) % 10),
+            linewidth=1.6,
+        )
 
-        ax.set_title(f"{title_prefix} = {threshold:.4f} / clusters = {cluster_count}")
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        ax.grid(True, alpha=0.3)
-
-    for idx in range(n_plots, n_rows * n_cols):
-        fig.delaxes(axes[idx // n_cols][idx % n_cols])
+    descriptor_mode = "magnitude" if use_magnitude_only else "complex"
+    ax.set_title(
+        f"Fourier descriptor clustering / threshold={threshold:.4f} / clusters={cluster_count} / mode={descriptor_mode}"
+    )
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.show()
 
 
 def main() -> None:
-    curve_a = [
-        (0.0, 0.0),
-        (1.0, 1.0),
-        (2.0, 0.0),
-    ]
-    curve_b = [
-        (0.0, 0.0),
-        (1.0, 0.2),
-        (2.0, 0.0),
-    ]
-
-    frechet_dist = discrete_frechet_distance(curve_a, curve_b)
-    dtw_dist = dtw_distance(curve_a, curve_b)
-    fourier_dist = fourier_descriptor_distance(curve_a, curve_b)
-    print(f"discrete Fréchet distance: {frechet_dist:.6f}")
-    print(f"DTW distance: {dtw_dist:.6f}")
-    print(f"Fourier descriptor distance: {fourier_dist:.6f}")
-
     curves = generate_various_curves(
         num_each_type=3,
         seed=42,
@@ -809,94 +563,36 @@ def main() -> None:
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
 
-    frechet_distance_matrix = compute_all_pair_distances(
+    distance_matrix = compute_all_pair_distances(
         curves,
-        metric="frechet",
-        normalize=False,
+        num_coefficients=16,
+        use_magnitude_only=False,
     )
-    dtw_distance_matrix = compute_all_pair_distances(
-        curves,
-        metric="dtw",
-        normalize=False,
-    )
-    fourier_distance_matrix = compute_all_pair_distances(
-        curves,
-        metric="fourier",
-        normalize=False,
-        fourier_num_coefficients=10,
-    )
-
-    print("pairwise Fréchet distance matrix:")
-    print(frechet_distance_matrix)
-    print("pairwise DTW distance matrix:")
-    print(dtw_distance_matrix)
     print("pairwise Fourier descriptor distance matrix:")
-    print(fourier_distance_matrix)
+    print(distance_matrix)
 
     target_cluster_count = 3
-    frechet_threshold = find_distance_threshold_for_cluster_count(
-        frechet_distance_matrix,
+    threshold = find_distance_threshold_for_cluster_count(
+        distance_matrix,
         target_cluster_count=target_cluster_count,
         linkage_method="average",
     )
-    dtw_threshold = find_distance_threshold_for_cluster_count(
-        dtw_distance_matrix,
-        target_cluster_count=target_cluster_count,
-        linkage_method="average",
-    )
-    fourier_threshold = find_distance_threshold_for_cluster_count(
-        fourier_distance_matrix,
-        target_cluster_count=target_cluster_count,
-        linkage_method="average",
-    )
+    print(f"threshold for {target_cluster_count} clusters: {threshold:.6f}")
 
-    print(f"threshold for {target_cluster_count} clusters (Fréchet): {frechet_threshold:.6f}")
-    print(f"threshold for {target_cluster_count} clusters (DTW): {dtw_threshold:.6f}")
-    print(f"threshold for {target_cluster_count} clusters (Fourier): {fourier_threshold:.6f}")
-
-    frechet_thresholds = np.linspace(
-        max(0.0, frechet_threshold * 0.5),
-        frechet_threshold * 1.5 if frechet_threshold > 0 else 1.0,
-        4,
-    ).tolist()
-    dtw_thresholds = np.linspace(
-        max(0.0, dtw_threshold * 0.5),
-        dtw_threshold * 1.5 if dtw_threshold > 0 else 1.0,
-        4,
-    ).tolist()
-    fourier_thresholds = np.linspace(
-        max(0.0, fourier_threshold * 0.5),
-        fourier_threshold * 1.5 if fourier_threshold > 0 else 1.0,
-        4,
-    ).tolist()
-
-    plot_clustering_threshold_sweep(
-        curves,
-        frechet_distance_matrix,
-        thresholds=frechet_thresholds,
+    labels = cluster_curves_with_hierarchical_clustering(
+        distance_matrix,
+        distance_threshold=threshold,
         linkage_method="average",
-        title_prefix="Fréchet threshold",
     )
-    plot_clustering_threshold_sweep(
-        curves,
-        dtw_distance_matrix,
-        thresholds=dtw_thresholds,
-        linkage_method="average",
-        title_prefix="DTW threshold",
-    )
-    plot_clustering_threshold_sweep(
-        curves,
-        fourier_distance_matrix,
-        thresholds=fourier_thresholds,
-        linkage_method="average",
-        title_prefix="Fourier threshold",
-    )
+    print("cluster labels:")
+    for i, label in enumerate(labels):
+        print(f"curve[{i}] -> cluster {label}")
 
+    plot_curves(curves, labels=labels, title="Fourier descriptor clustering")
     plot_metric_comparison(
         curves,
-        metrics=("frechet", "dtw", "fourier"),
-        normalize=False,
-        fourier_num_coefficients=10,
+        num_coefficients=16,
+        use_magnitude_only=False,
         target_cluster_count=3,
         linkage_method="average",
     )

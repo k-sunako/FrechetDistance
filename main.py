@@ -63,25 +63,32 @@ def discrete_frechet_distance(
 def generate_sine_curves(
     num_curves: int = 100,
     num_points: int = 200,
-    cycles: float = 2.0,
     amplitude: float = 1.0,
     offset_step: float = 0.1,
     phase_step: float = 0.0,
+    x_start_min: float = 0.0,
+    x_start_max: float = 10.0,
+    seed: int | None = None,
 ) -> list[list[Point2D]]:
     """
     正弦波をオフセットした2次元曲線を複数生成します。
 
-    各曲線は x 軸方向に 0 から 2pi * cycles までを取り、
-    y = amplitude * sin(x + phase) + offset
-    で構成します。
+    各曲線は x 軸方向に長さ 2pi の区間を持ち、
+    開始位置は曲線ごとにランダムに変わります。
+
+    それぞれの曲線は以下で生成します:
+        x in [x_start, x_start + 2pi]
+        y = amplitude * sin(x + phase) + offset
 
     Args:
         num_curves: 生成する曲線数
         num_points: 1曲線あたりの点数
-        cycles: x 軸方向に何周期分作るか
         amplitude: 正弦波の振幅
         offset_step: 曲線ごとの y オフセット増分
         phase_step: 曲線ごとの位相差増分
+        x_start_min: ランダムな x 開始位置の最小値
+        x_start_max: ランダムな x 開始位置の最大値
+        seed: 乱数シード
 
     Returns:
         曲線のリスト
@@ -90,11 +97,17 @@ def generate_sine_curves(
         raise ValueError("num_curves は 1 以上で指定してください。")
     if num_points < 2:
         raise ValueError("num_points は 2 以上で指定してください。")
+    if x_start_min > x_start_max:
+        raise ValueError("x_start_min は x_start_max 以下で指定してください。")
 
-    x_values = np.linspace(0.0, 2.0 * math.pi * cycles, num_points)
+    rng = np.random.default_rng(seed)
     curves: list[list[Point2D]] = []
 
     for i in range(num_curves):
+        x_start = float(rng.uniform(x_start_min, x_start_max))
+        x_end = x_start + 2.0 * math.pi
+        x_values = np.linspace(x_start, x_end, num_points)
+
         offset = i * offset_step
         phase = i * phase_step
         curve = [
@@ -155,7 +168,7 @@ def main() -> None:
     dist = discrete_frechet_distance(curve_a, curve_b)
     print(f"discrete Fréchet distance: {dist:.6f}")
 
-    curves = generate_sine_curves(num_curves=100)
+    curves = generate_sine_curves(num_curves=100, seed=42)
     print(f"generated curves: {len(curves)}")
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")

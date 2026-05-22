@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import math
 import numpy as np
 
 
@@ -58,6 +59,52 @@ def discrete_frechet_distance(
     return c(n - 1, m - 1)
 
 
+def generate_sine_curves(
+    num_curves: int = 100,
+    num_points: int = 200,
+    cycles: float = 2.0,
+    amplitude: float = 1.0,
+    offset_step: float = 0.1,
+    phase_step: float = 0.0,
+) -> list[list[Point2D]]:
+    """
+    正弦波をオフセットした2次元曲線を複数生成します。
+
+    各曲線は x 軸方向に 0 から 2pi * cycles までを取り、
+    y = amplitude * sin(x + phase) + offset
+    で構成します。
+
+    Args:
+        num_curves: 生成する曲線数
+        num_points: 1曲線あたりの点数
+        cycles: x 軸方向に何周期分作るか
+        amplitude: 正弦波の振幅
+        offset_step: 曲線ごとの y オフセット増分
+        phase_step: 曲線ごとの位相差増分
+
+    Returns:
+        曲線のリスト
+    """
+    if num_curves < 1:
+        raise ValueError("num_curves は 1 以上で指定してください。")
+    if num_points < 2:
+        raise ValueError("num_points は 2 以上で指定してください。")
+
+    x_values = np.linspace(0.0, 2.0 * math.pi * cycles, num_points)
+    curves: list[list[Point2D]] = []
+
+    for i in range(num_curves):
+        offset = i * offset_step
+        phase = i * phase_step
+        curve = [
+            (float(x), float(amplitude * math.sin(x + phase) + offset))
+            for x in x_values
+        ]
+        curves.append(curve)
+
+    return curves
+
+
 def main() -> None:
     # 実験用サンプル
     curve_a = [
@@ -73,6 +120,11 @@ def main() -> None:
 
     dist = discrete_frechet_distance(curve_a, curve_b)
     print(f"discrete Fréchet distance: {dist:.6f}")
+
+    curves = generate_sine_curves(num_curves=100)
+    print(f"generated curves: {len(curves)}")
+    print(f"first curve points: {len(curves[0])}")
+    print(f"last curve points: {len(curves[-1])}")
 
 
 if __name__ == "__main__":

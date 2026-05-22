@@ -34,6 +34,62 @@ def translate_curve(
     return [(float(x), float(y)) for x, y in translated]
 
 
+def normalize_curve(
+    curve: Sequence[Sequence[float]],
+    *,
+    center: bool = True,
+    rotate: bool = True,
+    scale: bool = True,
+    eps: float = 1e-12,
+) -> list[Point2D]:
+    """
+    曲線を正規化します。
+
+    正規化内容:
+    - center=True: 重心を原点へ移動
+    - rotate=True: PCA により主成分方向を x 軸へ揃える
+    - scale=True: 全体スケールを標準化する
+
+    Notes:
+        これは厳密なアフィン不変化ではありませんが、
+        平行移動・回転・スケール差の影響を小さくできます。
+    """
+    arr = _as_point_array(curve).astype(float, copy=True)
+
+    if center:
+        centroid = arr.mean(axis=0)
+        arr = arr - centroid
+
+    if rotate and len(arr) >= 2:
+        cov = np.cov(arr.T)
+        if np.all(np.isfinite(cov)) and cov.shape == (2, 2):
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            principal = eigvecs[:, np.argmax(eigvals)]
+            angle = math.atan2(float(principal[1]), float(principal[0]))
+            cos_a = math.cos(-angle)
+            sin_a = math.sin(-angle)
+            rotation_matrix = np.array(
+                [
+                    [cos_a, -sin_a],
+                    [sin_a, cos_a],
+                ],
+                dtype=float,
+            )
+            arr = arr @ rotation_matrix.T
+
+            # 方向の符号を揃えるため、主成分の x 成分が負なら反転する
+            if arr[:, 0].mean() < 0:
+                arr[:, 0] *= -1.0
+                arr[:, 1] *= -1.0
+
+    if scale:
+        scale_value = float(np.sqrt(np.mean(np.sum(arr ** 2, axis=1))))
+        if scale_value > eps:
+            arr = arr / scale_value
+
+    return [(float(x), float(y)) for x, y in arr]
+
+
 def discrete_frechet_distance(
     curve1: Sequence[Sequence[float]],
     curve2: Sequence[Sequence[float]],
@@ -73,6 +129,18 @@ def discrete_frechet_distance(
         return ca[i, j]
 
     return c(n - 1, m - 1)
+
+
+def normalized_discrete_frechet_distance(
+    curve1: Sequence[Sequence[float]],
+    curve2: Sequence[Sequence[float]],
+) -> float:
+    """
+    正規化前処理を施したうえで discrete Fréchet 距離を計算します。
+    """
+    norm1 = normalize_curve(curve1)
+    norm2 = normalize_curve(curve2)
+    return discrete_frechet_distance(norm1, norm2)
 
 
 def rotate_curve(
@@ -309,9 +377,14 @@ def generate_various_curves(
 
 def compute_all_pair_frechet_distances(
     curves: list[list[Point2D]],
+    normalize: bool = False,
 ) -> np.ndarray:
     """
     曲線群を総当たりで比較し、距離行列を返します。
+
+    Args:
+        curves: 曲線群
+        normalize: True のとき正規化前処理を施してから距離を計算する
 
     Returns:
         shape=(n, n) の距離行列
@@ -324,7 +397,10 @@ def compute_all_pair_frechet_distances(
 
     for i in range(n):
         for j in range(i + 1, n):
-            dist = discrete_frechet_distance(curves[i], curves[j])
+            if normalize:
+                dist = normalized_discrete_frechet_distance(curves[i], curves[j])
+            else:
+                dist = discrete_frechet_distance(curves[i], curves[j])
             distances[i, j] = dist
             distances[j, i] = dist
 
@@ -492,7 +568,7 @@ def main() -> None:
     print(f"first curve points: {len(curves[0])}")
     print(f"last curve points: {len(curves[-1])}")
 
-    distance_matrix = compute_all_pair_frechet_distances(curves)
+    distance_matrix = compute_all_pair_frechet_distances(curves, normalize=True)
     print("pairwise distance matrix:")
     print(distance_matrix)
 

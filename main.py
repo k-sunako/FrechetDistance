@@ -98,22 +98,141 @@ def normalize_curve(
     return [(float(x), float(y)) for x, y in arr]
 
 
+def _resample_curve(
+    curve: Sequence[Sequence[float]],
+    num_points: int,
+) -> np.ndarray:
+    """
+    曲線を弧長パラメータで等間隔に再サンプリングします。
+    """
+    arr = _as_point_array(curve).astype(float, copy=True)
+
+    if num_points < 2:
+        raise ValueError("num_points は 2 以上で指定してください。")
+
+    diffs = np.diff(arr, axis=0)
+    segment_lengths = np.sqrt(np.sum(diffs ** 2, axis=1))
+    total_length = float(np.sum(segment_lengths))
+
+    if total_length <= 1e-12:
+        return np.repeat(arr[:1], num_points, axis=0)
+
+    cumulative = np.concatenate([[0.0], np.cumsum(segment_lengths)])
+    target = np.linspace(0.0, total_length, num_points)
+
+    x = np.interp(target, cumulative, arr[:, 0])
+    y = np.interp(target, cumulative, arr[:, 1])
+    return np.column_stack([x, y])
+
+
+def _align_start_point(curve: np.ndarray) -> np.ndarray:
+    """
+    曲線の開始点依存を弱めるため、最も左下に近い点を開始点に回転します。
+    """
+    if len(curve) == 0:
+        return curve
+
+    order = np.lexsort((curve[:, 1], curve[:, 0]))
+    start_index = int(order[0])
+    return np.roll(curve, -start_index, axis=0)
+
+
+def _pca_align_curve(curve: np.ndarray) -> np.ndarray:
+    """
+    主成分軸に揃えて回転不変性を高めます。
+    """
+    if len(curve) < 2:
+        return curve
+
+    centered = curve - curve.mean(axis=0)
+    cov = np.cov(centered.T)
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+    principal_axis = eigenvectors[:, np.argmax(eigenvalues)]
+    angle = math.atan2(float(principal_axis[1]), float(principal_axis[0]))
+
+    cos_a = math.cos(-angle)
+    sin_a = math.sin(-angle)
+    rotation_matrix = np.array(
+        [
+            [cos_a, -sin_a],
+            [sin_a, cos_a],
+        ],
+        dtype=float,
+    )
+    aligned = centered @ rotation_matrix.T
+
+    if np.mean(aligned[:, 1]) < 0:
+        aligned[:, 1] *= -1.0
+
+    return aligned
+
+
+def _standardize_curve_for_descriptor(
+    curve: Sequence[Sequence[float]],
+    *,
+    num_points: int | None = None,
+    use_pca_alignment: bool = True,
+    use_start_alignment: bool = True,
+    center: bool = True,
+    scale: bool = True,
+) -> np.ndarray:
+    """
+    Fourier記述子用の前処理をまとめて行います。
+    """
+    arr = _as_point_array(curve).astype(float, copy=True)
+
+    if num_points is not None:
+        arr = _resample_curve(arr, num_points=num_points)
+
+    if center:
+        arr = arr - arr.mean(axis=0)
+
+    if scale:
+        scale_value = float(np.sqrt(np.mean(np.sum(arr ** 2, axis=1))))
+        if scale_value > 1e-12:
+            arr = arr / scale_value
+
+    if use_pca_alignment:
+        arr = _pca_align_curve(arr)
+
+    if use_start_alignment:
+        arr = _align_start_point(arr)
+
+    return arr
+
+
 def fourier_descriptor(
     curve: Sequence[Sequence[float]],
     num_coefficients: int = 16,
     normalize: bool = True,
     use_magnitude_only: bool = False,
+    resample_points: int | None = 256,
+    use_pca_alignment: bool = True,
+    use_start_alignment: bool = True,
 ) -> np.ndarray:
     """
     曲線の Fourier 記述子を計算します。
 
-    曲線を複素数列 z = x + i y として扱い、
-    FFT の低周波成分を特徴量として取り出します。
+    改善点:
+    - 弧長で再サンプリング
+    - 重心・スケール正規化
+    - 主成分軸で回転を揃える
+    - 開始点依存を弱める
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
     if normalize:
-        arr = _as_point_array(normalize_curve(arr))
+        arr = _standardize_curve_for_descriptor(
+            arr,
+            num_points=resample_points,
+            use_pca_alignment=use_pca_alignment,
+            use_start_alignment=use_start_alignment,
+            center=True,
+            scale=True,
+        )
+    elif resample_points is not None:
+        arr = _resample_curve(arr, num_points=resample_points)
 
     if len(arr) < 2:
         return np.zeros(num_coefficients, dtype=float)
@@ -130,8 +249,9 @@ def fourier_descriptor(
     if use_magnitude_only:
         features = np.abs(coeffs).astype(float)
     else:
-        if np.abs(coeffs[0]) > 1e-12:
-            coeffs = coeffs / np.abs(coeffs[0])
+        base = coeffs[0]
+        if np.abs(base) > 1e-12:
+            coeffs = coeffs / base
         features = np.concatenate([coeffs.real, coeffs.imag]).astype(float)
 
     return features
@@ -142,6 +262,9 @@ def fourier_descriptor_distance(
     curve2: Sequence[Sequence[float]],
     num_coefficients: int = 16,
     use_magnitude_only: bool = False,
+    resample_points: int | None = 256,
+    use_pca_alignment: bool = True,
+    use_start_alignment: bool = True,
 ) -> float:
     """
     Fourier 記述子同士のユークリッド距離を計算します。
@@ -151,12 +274,18 @@ def fourier_descriptor_distance(
         num_coefficients=num_coefficients,
         normalize=True,
         use_magnitude_only=use_magnitude_only,
+        resample_points=resample_points,
+        use_pca_alignment=use_pca_alignment,
+        use_start_alignment=use_start_alignment,
     )
     d2 = fourier_descriptor(
         curve2,
         num_coefficients=num_coefficients,
         normalize=True,
         use_magnitude_only=use_magnitude_only,
+        resample_points=resample_points,
+        use_pca_alignment=use_pca_alignment,
+        use_start_alignment=use_start_alignment,
     )
     return float(np.linalg.norm(d1 - d2))
 
@@ -335,6 +464,9 @@ def compute_all_pair_distances(
     curves: list[list[Point2D]],
     num_coefficients: int = 16,
     use_magnitude_only: bool = False,
+    resample_points: int | None = 256,
+    use_pca_alignment: bool = True,
+    use_start_alignment: bool = True,
 ) -> np.ndarray:
     """
     Fourier 記述子による全ペア距離行列を作成します。
@@ -351,6 +483,9 @@ def compute_all_pair_distances(
             num_coefficients=num_coefficients,
             normalize=True,
             use_magnitude_only=use_magnitude_only,
+            resample_points=resample_points,
+            use_pca_alignment=use_pca_alignment,
+            use_start_alignment=use_start_alignment,
         )
         for curve in curves
     ]
@@ -599,6 +734,9 @@ def main() -> None:
         curves,
         num_coefficients=16,
         use_magnitude_only=False,
+        resample_points=256,
+        use_pca_alignment=True,
+        use_start_alignment=True,
     )
     print("pairwise Fourier descriptor distance matrix:")
     print(distance_matrix)

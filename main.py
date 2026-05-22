@@ -50,6 +50,37 @@ def _rotate_array(arr: np.ndarray, angle_radians: float) -> np.ndarray:
     return arr @ rotation_matrix.T
 
 
+def _normalize_by_covariance(
+    arr: np.ndarray,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """
+    共分散行列を使って、曲線の向きを安定化させます。
+    """
+    if len(arr) < 2:
+        return arr
+
+    cov = np.cov(arr.T)
+    if not np.all(np.isfinite(cov)) or cov.shape != (2, 2):
+        return arr
+
+    eigvals, eigvecs = np.linalg.eigh(cov)
+
+    # 主成分軸へ回転
+    principal = eigvecs[:, np.argmax(eigvals)]
+    angle = math.atan2(float(principal[1]), float(principal[0]))
+    arr = _rotate_array(arr, -angle)
+
+    # 縦横のスケール差を少し緩和
+    cov2 = np.cov(arr.T)
+    if np.all(np.isfinite(cov2)) and cov2.shape == (2, 2):
+        sx = math.sqrt(float(cov2[0, 0])) if cov2[0, 0] > eps else 1.0
+        sy = math.sqrt(float(cov2[1, 1])) if cov2[1, 1] > eps else 1.0
+        arr = arr / np.array([sx, sy], dtype=float)
+
+    return arr
+
+
 def normalize_curve(
     curve: Sequence[Sequence[float]],
     *,
@@ -58,6 +89,7 @@ def normalize_curve(
     rotate: bool = True,
     scale: bool = True,
     unify_direction: bool = True,
+    covariance_align: bool = True,
     eps: float = 1e-12,
 ) -> list[Point2D]:
     """
@@ -67,8 +99,14 @@ def normalize_curve(
     - center=True: 重心を原点へ移動
     - align_first_point=True: 最初の点を x 軸の正方向に揃える
     - rotate=True: PCA により主成分方向を x 軸へ揃える
+    - covariance_align=True: 共分散に基づく追加整列
     - unify_direction=True: 方向の反転を抑制する
     - scale=True: 全体スケールを標準化する
+
+    Notes:
+        これは厳密なアフィン不変化ではありませんが、
+        回転・平行移動・スケール差・軽微なせん断の影響を
+        以前より小さくできます。
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
@@ -90,6 +128,9 @@ def normalize_curve(
             principal = eigvecs[:, np.argmax(eigvals)]
             angle = math.atan2(float(principal[1]), float(principal[0]))
             arr = _rotate_array(arr, -angle)
+
+    if covariance_align:
+        arr = _normalize_by_covariance(arr, eps=eps)
 
     if unify_direction and len(arr) >= 2:
         start = arr[0]
@@ -324,7 +365,7 @@ def generate_various_curves(
     type_order = np.repeat(np.arange(3), num_each_type)
     rng.shuffle(type_order)
 
-    for global_index, type_index in enumerate(type_order):
+    for type_index in type_order:
         generator = generators[int(type_index)]
 
         x_start = float(rng.uniform(x_start_min, x_start_max))

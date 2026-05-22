@@ -34,25 +34,45 @@ def translate_curve(
     return [(float(x), float(y)) for x, y in translated]
 
 
+def _rotate_array(arr: np.ndarray, angle_radians: float) -> np.ndarray:
+    """
+    numpy 配列の点列を原点周りに回転します。
+    """
+    cos_a = math.cos(angle_radians)
+    sin_a = math.sin(angle_radians)
+    rotation_matrix = np.array(
+        [
+            [cos_a, -sin_a],
+            [sin_a, cos_a],
+        ],
+        dtype=float,
+    )
+    return arr @ rotation_matrix.T
+
+
 def normalize_curve(
     curve: Sequence[Sequence[float]],
     *,
     center: bool = True,
+    align_first_point: bool = True,
     rotate: bool = True,
     scale: bool = True,
+    unify_direction: bool = True,
     eps: float = 1e-12,
 ) -> list[Point2D]:
     """
     曲線を正規化します。
 
-    正規化内容:
+    強化版の正規化内容:
     - center=True: 重心を原点へ移動
+    - align_first_point=True: 最初の点を x 軸の正方向に揃える
     - rotate=True: PCA により主成分方向を x 軸へ揃える
+    - unify_direction=True: 方向の反転を抑制する
     - scale=True: 全体スケールを標準化する
 
     Notes:
         これは厳密なアフィン不変化ではありませんが、
-        平行移動・回転・スケール差の影響を小さくできます。
+        平行移動・回転・反転・スケール差の影響をさらに小さくできます。
     """
     arr = _as_point_array(curve).astype(float, copy=True)
 
@@ -60,31 +80,36 @@ def normalize_curve(
         centroid = arr.mean(axis=0)
         arr = arr - centroid
 
+    if align_first_point and len(arr) >= 2:
+        first_vec = arr[0]
+        norm = float(np.linalg.norm(first_vec))
+        if norm > eps:
+            angle = math.atan2(float(first_vec[1]), float(first_vec[0]))
+            arr = _rotate_array(arr, -angle)
+
     if rotate and len(arr) >= 2:
         cov = np.cov(arr.T)
         if np.all(np.isfinite(cov)) and cov.shape == (2, 2):
             eigvals, eigvecs = np.linalg.eigh(cov)
             principal = eigvecs[:, np.argmax(eigvals)]
             angle = math.atan2(float(principal[1]), float(principal[0]))
-            cos_a = math.cos(-angle)
-            sin_a = math.sin(-angle)
-            rotation_matrix = np.array(
-                [
-                    [cos_a, -sin_a],
-                    [sin_a, cos_a],
-                ],
-                dtype=float,
-            )
-            arr = arr @ rotation_matrix.T
+            arr = _rotate_array(arr, -angle)
 
-            if arr[:, 0].mean() < 0:
-                arr[:, 0] *= -1.0
-                arr[:, 1] *= -1.0
+    if unify_direction and len(arr) >= 2:
+        # 曲線の向きが逆でも同じように見えるよう、代表点で反転方向をそろえる
+        start = arr[0]
+        end = arr[-1]
+        if (end[0] < start[0]) or (abs(end[0] - start[0]) < eps and end[1] < start[1]):
+            arr = arr[::-1]
 
     if scale:
         scale_value = float(np.sqrt(np.mean(np.sum(arr ** 2, axis=1))))
         if scale_value > eps:
             arr = arr / scale_value
+
+    # 数値誤差を少し抑えるため、再度中心を揃える
+    if center:
+        arr = arr - arr.mean(axis=0)
 
     return [(float(x), float(y)) for x, y in arr]
 
@@ -129,7 +154,7 @@ def normalized_discrete_frechet_distance(
     curve2: Sequence[Sequence[float]],
 ) -> float:
     """
-    正規化前処理を施したうえで discrete Fréchet 距離を計算します。
+    強化した正規化前処理を施したうえで discrete Fréchet 距離を計算します。
     """
     norm1 = normalize_curve(curve1)
     norm2 = normalize_curve(curve2)
